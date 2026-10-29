@@ -1,0 +1,465 @@
+!Version "1.0"
+
+BinaryFileEntry
+{
+    !UUID = "ee5a3b55-c00f-49ff-88b4-535761decf0e"
+    Path = "Fonts/Inter/Inter-Bold.ttf"
+    Hash = "719822461966744fb5edfefe986b9412"
+    Size = 420428
+}
+
+BinaryFileEntry
+{
+    !UUID = "b3b72fe0-d152-4c42-90fc-6028f9628191"
+    Path = "Fonts/Inter/Inter-Medium.ttf"
+    Hash = "0925ec5825c90461e266e77553066244"
+    Size = 417300
+}
+
+BinaryFileEntry
+{
+    !UUID = "c14a615b-5f88-445c-849c-b8cde7528976"
+    Path = "Fonts/Inter/Inter-Regular.ttf"
+    Hash = "0a713df51d8f8d6a6bd8fec5639ca04e"
+    Size = 411640
+}
+
+BinaryFileEntry
+{
+    !UUID = "62c0dcf6-5046-45db-8376-838f4cebeef5"
+    Path = "Fonts/Inter/Inter-SemiBold.ttf"
+    Hash = "6cedfa853573ee4c91a41026295ea622"
+    Size = 419744
+}
+
+BinaryFileEntry
+{
+    !UUID = "b9f5e747-c7e4-44ad-9bc2-de750fb2945d"
+    Path = "Fonts/Inter/InterVariable.ttf"
+    Hash = "461d387879559026d5367bc9095e28c4"
+    Size = 879708
+}
+
+BinaryFileEntry
+{
+    !UUID = "c258defd-b178-4441-b6a5-43cf505aeb8f"
+    Path = "Fonts/Inter/LICENSE.txt"
+    Hash = "d3d2125d8347569c7cf73828be2d5ca4"
+    Size = 4380
+}
+
+BinaryFileEntry
+{
+    !UUID = "74c1a5b8-627c-4625-b107-e7dbe45c0edb"
+    Path = "Fonts/Inter/SOURCE.txt"
+    Hash = "12522f0b7946f9bbeb89609048e0dbb9"
+    Size = 432
+}
+
+BinaryFileEntry
+{
+    !UUID = "975d9940-7432-4ba3-bfb6-d4b2a1b0536b"
+    Path = "Fonts/JetBrainsMono/JetBrainsMono-Bold.ttf"
+    Hash = "93e517c92d1d2ebe79361d0b5381ade2"
+    Size = 277828
+}
+
+BinaryFileEntry
+{
+    !UUID = "9eeca9fb-1c4c-48e7-9c2a-cd8b1f1b24f8"
+    Path = "Fonts/JetBrainsMono/JetBrainsMono-Regular.ttf"
+    Hash = "8b9f3f88264ea16e7f44179f93a2dfe1"
+    Size = 273900
+}
+
+BinaryFileEntry
+{
+    !UUID = "e226c102-d64d-43be-a803-ebb1f05ddc87"
+    Path = "Fonts/JetBrainsMono/LICENSE.txt"
+    Hash = "6031e4555e198b4c5032e186dd51db15"
+    Size = 4399
+}
+
+BinaryFileEntry
+{
+    !UUID = "b664272d-12dc-42ec-b377-0ae99115a1a3"
+    Path = "Fonts/JetBrainsMono/SOURCE.txt"
+    Hash = "42c9ecdbe9d1c884c355cfe72795da81"
+    Size = 426
+}
+
+BinaryFileEntry
+{
+    !UUID = "d989ce7f-ffb5-4efc-bf92-3728b71b3a76"
+    Path = "Fonts/NotoSans/LICENSE.txt"
+    Hash = "2742b6d2605244c9a41cba1f5ac0e893"
+    Size = 4396
+}
+
+BinaryFileEntry
+{
+    !UUID = "9d9a6cef-b58b-44a0-8039-ae0ff5e50ff6"
+    Path = "Fonts/NotoSans/NotoSans-Bold.ttf"
+    Hash = "195a990258f4fc6421aeefdbc0822e73"
+    Size = 631484
+}
+
+BinaryFileEntry
+{
+    !UUID = "75fe77a7-094a-4f63-955e-157f3f11ac0b"
+    Path = "Fonts/NotoSans/NotoSans-Regular.ttf"
+    Hash = "e9f9dab96f78b2422f66ebdf9fa74a51"
+    Size = 621572
+}
+
+BinaryFileEntry
+{
+    !UUID = "d406cfb2-676e-4765-b8ca-9b0978668b8e"
+    Path = "Fonts/NotoSans/SOURCE.txt"
+    Hash = "3bfc90ca1deaaabb5e02b00dcb901573"
+    Size = 475
+}
+
+BinaryFileEntry
+{
+    !UUID = "bbd7c177-2dbc-4ff1-b904-7e2e3530155b"
+    Path = "Icons/Lucide/LICENSE.txt"
+    Hash = "09c42990569400ab344ce72f848e84b3"
+    Size = 3208
+}
+
+BinaryFileEntry
+{
+    !UUID = "a94d731b-71ac-4266-913d-611d8c9a6200"
+    Path = "Icons/Lucide/SOURCE.txt"
+    Hash = "52067a0d931477eaac17547bf8a4c398"
+    Size = 767
+}
+
+BinaryFileEntry
+{
+    !UUID = "7895c2d3-c175-4a87-ac2b-df343079a760"
+    Path = "Icons/Lucide/audio-waveform.svg"
+    Hash = "f12cc38ed6adc6a5778b18c6b97c0e76"
+    Size = 411
+}
+
+BinaryFileEntry
+{
+    !UUID = "ffbbdf53-abe0-4deb-b73e-1cde940b594e"
+    Path = "Icons/Lucide/box.svg"
+    Hash = "be7492c8a78776a7fbf1014b59b7fb2a"
+    Size = 475
+}
+
+BinaryFileEntry
+{
+    !UUID = "e3729141-b387-43aa-89a3-5e726c34e9c5"
+    Path = "Icons/Lucide/bug.svg"
+    Hash = "74771e36a2a5c2e0359197ff8b0771c0"
+    Size = 689
+}
+
+BinaryFileEntry
+{
+    !UUID = "f2702997-bf75-49b5-bfb3-7eed7e843939"
+    Path = "Icons/Lucide/chevron-down.svg"
+    Hash = "1122b11b4f8d4eb6f4c9304e09b46660"
+    Size = 319
+}
+
+BinaryFileEntry
+{
+    !UUID = "3c760322-23a3-4902-b198-af2c900c6058"
+    Path = "Icons/Lucide/chevron-left.svg"
+    Hash = "7a2a4ac5993ef2c950cca06ce6aa54c3"
+    Size = 321
+}
+
+BinaryFileEntry
+{
+    !UUID = "1225420d-9f29-486e-a619-51c224e894f2"
+    Path = "Icons/Lucide/chevron-right.svg"
+    Hash = "1b1c6bcb3d730611107988cbcaf66169"
+    Size = 321
+}
+
+BinaryFileEntry
+{
+    !UUID = "1d9a65ef-55f3-4f1d-bd6d-7223b86bb460"
+    Path = "Icons/Lucide/circle-dot.svg"
+    Hash = "d9516c5b640e29e20c3a64b09b7bcabf"
+    Size = 360
+}
+
+BinaryFileEntry
+{
+    !UUID = "c85d1e74-8a40-47e8-9dba-4a6ba610aa83"
+    Path = "Icons/Lucide/copy.svg"
+    Hash = "7620247eb89ca2d3101512e1c0a284bf"
+    Size = 414
+}
+
+BinaryFileEntry
+{
+    !UUID = "e95d7a01-fdb4-48bf-9ff7-0b336c9fa200"
+    Path = "Icons/Lucide/download.svg"
+    Hash = "f93c8da65823f0b22b63cb5f98c67bc2"
+    Size = 397
+}
+
+BinaryFileEntry
+{
+    !UUID = "21dbf516-eddb-4a53-9c56-751f344b7dfd"
+    Path = "Icons/Lucide/external-link.svg"
+    Hash = "b5ed79c748b080cd5bb2934766ea8adb"
+    Size = 416
+}
+
+BinaryFileEntry
+{
+    !UUID = "09e272b1-e7f2-4c1b-bdb4-8d08ae59fcd0"
+    Path = "Icons/Lucide/file.svg"
+    Hash = "af4e1f6ae749974069efcab2b52d720e"
+    Size = 448
+}
+
+BinaryFileEntry
+{
+    !UUID = "ccbff420-3d4b-4c05-9341-652a1f918bc1"
+    Path = "Icons/Lucide/folder-open.svg"
+    Hash = "f2e0a48ef81aaec124367a36f3e9cd60"
+    Size = 483
+}
+
+BinaryFileEntry
+{
+    !UUID = "fc4a48df-78ea-4663-b2f1-66eaf0d34cbb"
+    Path = "Icons/Lucide/folder-plus.svg"
+    Hash = "a20cc4a095d5527c53c73a8fc0efc7f5"
+    Size = 471
+}
+
+BinaryFileEntry
+{
+    !UUID = "abfd7e29-4458-440d-ae99-0384bd4af009"
+    Path = "Icons/Lucide/folder.svg"
+    Hash = "98efeff680071baab251be680a552f07"
+    Size = 419
+}
+
+BinaryFileEntry
+{
+    !UUID = "69403f46-9555-46f2-a02e-1dcd4ee36ac3"
+    Path = "Icons/Lucide/git-branch.svg"
+    Hash = "3c5d72dbb13f680bbce4058f03c597e7"
+    Size = 394
+}
+
+BinaryFileEntry
+{
+    !UUID = "2bf501d2-86be-488d-bb1d-ab255f777aa4"
+    Path = "Icons/Lucide/history.svg"
+    Hash = "8683b1bcb67414bbd004812164ed4498"
+    Size = 402
+}
+
+BinaryFileEntry
+{
+    !UUID = "8eeaf54e-da94-4bf3-82d0-44c60e84a3a9"
+    Path = "Icons/Lucide/image.svg"
+    Hash = "f712af69912833003113bbbeddc14de1"
+    Size = 434
+}
+
+BinaryFileEntry
+{
+    !UUID = "587ecfdf-f070-4ddb-9c54-7805bc7414e6"
+    Path = "Icons/Lucide/layout-grid.svg"
+    Hash = "cae9d21e22486d7d07dfcee336ca7d85"
+    Size = 498
+}
+
+BinaryFileEntry
+{
+    !UUID = "04d3300a-f37f-4d02-9d30-734f83ed369a"
+    Path = "Icons/Lucide/list.svg"
+    Hash = "87dbd9dc5facbab46850d8c618619a4a"
+    Size = 428
+}
+
+BinaryFileEntry
+{
+    !UUID = "e6186eed-43bd-419d-a96c-e233b2a2e268"
+    Path = "Icons/Lucide/map.svg"
+    Hash = "cc58412169172ff72ac6149835325728"
+    Size = 590
+}
+
+BinaryFileEntry
+{
+    !UUID = "b61cc408-8778-479b-8a75-57765ade0ba6"
+    Path = "Icons/Lucide/minus.svg"
+    Hash = "2e6634c52057dec393e099fc3c771ab3"
+    Size = 308
+}
+
+BinaryFileEntry
+{
+    !UUID = "ce7596ec-fae7-42ce-bbc4-6a61c7501713"
+    Path = "Icons/Lucide/mountain.svg"
+    Hash = "3d965c1424041364862f1be66c6f278d"
+    Size = 327
+}
+
+BinaryFileEntry
+{
+    !UUID = "513cb2c4-af0c-4bd5-ad5a-547625ea1ea9"
+    Path = "Icons/Lucide/music.svg"
+    Hash = "81cc5e8ae6d3ffc4f74ccd33a86625cb"
+    Size = 384
+}
+
+BinaryFileEntry
+{
+    !UUID = "859fe7c6-eae0-4369-a6f3-6017b26f0914"
+    Path = "Icons/Lucide/package.svg"
+    Hash = "36e5ff50987553779820090dfe3424da"
+    Size = 524
+}
+
+BinaryFileEntry
+{
+    !UUID = "b6da5e92-91f8-40eb-9bb8-786d6a8bd219"
+    Path = "Icons/Lucide/pencil.svg"
+    Hash = "c097a13be9984ccb5eeedd3c24bc1a33"
+    Size = 454
+}
+
+BinaryFileEntry
+{
+    !UUID = "223c1722-c1b8-4da3-8093-7ee69e7c5061"
+    Path = "Icons/Lucide/person-standing.svg"
+    Hash = "4d306c58aeea53f7f25fa55a1b854fd4"
+    Size = 409
+}
+
+BinaryFileEntry
+{
+    !UUID = "04db0d4e-50ff-42a3-bad8-784720fa8e54"
+    Path = "Icons/Lucide/plus.svg"
+    Hash = "291e439a5861f2b29b1231570f3041f1"
+    Size = 331
+}
+
+BinaryFileEntry
+{
+    !UUID = "6a3cbe41-f2f4-4d68-8238-690227c304af"
+    Path = "Icons/Lucide/refresh-cw.svg"
+    Hash = "ef836d04b70edf64b10fb884fce4bde0"
+    Size = 473
+}
+
+BinaryFileEntry
+{
+    !UUID = "8f0529cc-a960-49f0-9f02-d7b233d03353"
+    Path = "Icons/Lucide/save-all.svg"
+    Hash = "a970cea3c64d5ae435b7c9baf4a90a41"
+    Size = 553
+}
+
+BinaryFileEntry
+{
+    !UUID = "bc141a6c-88a1-44cf-8c0f-2abb7a3da94c"
+    Path = "Icons/Lucide/scan-search.svg"
+    Hash = "f751b6525ea9f2126355ee0b5bef8714"
+    Size = 513
+}
+
+BinaryFileEntry
+{
+    !UUID = "ad12aa71-e0b9-4c20-83b8-4339f009929d"
+    Path = "Icons/Lucide/search.svg"
+    Hash = "f57b6794e1d4235bc9fc1b67bccb6d6c"
+    Size = 352
+}
+
+BinaryFileEntry
+{
+    !UUID = "ac06e410-07ec-495b-addd-da71d0bef286"
+    Path = "Icons/Lucide/settings.svg"
+    Hash = "8aedd9c506b17f115e48444f7b053b16"
+    Size = 665
+}
+
+BinaryFileEntry
+{
+    !UUID = "d580eca0-7cb3-4016-9f5c-47a507ea4f86"
+    Path = "Icons/Lucide/shapes.svg"
+    Hash = "baf87dc118a310c474ade9c27019e05d"
+    Size = 482
+}
+
+BinaryFileEntry
+{
+    !UUID = "c63b80c8-6a24-49a7-bc48-27627690b6a1"
+    Path = "Icons/Lucide/shield-check.svg"
+    Hash = "4c8d3f4bb08a3aa845ee97198f4a783c"
+    Size = 498
+}
+
+BinaryFileEntry
+{
+    !UUID = "3ce1b51d-e3f8-41e7-aa60-607d5d1f0a63"
+    Path = "Icons/Lucide/sliders-vertical.svg"
+    Hash = "33a45ff5c0cff4ca39dbb0c1d75f4454"
+    Size = 509
+}
+
+BinaryFileEntry
+{
+    !UUID = "174e2788-c1bc-4f0f-b659-f0661c11fc49"
+    Path = "Icons/Lucide/sparkles.svg"
+    Hash = "b7687262101fff6a3035da4d9730589d"
+    Size = 646
+}
+
+BinaryFileEntry
+{
+    !UUID = "5e53e5db-d597-48d0-802b-b8ed42476483"
+    Path = "Icons/Lucide/square.svg"
+    Hash = "3c849345cca54ee260fe0547d0ff124a"
+    Size = 338
+}
+
+BinaryFileEntry
+{
+    !UUID = "74e9b5eb-eedb-44b9-80b7-b45a78bb5e3a"
+    Path = "Icons/Lucide/star.svg"
+    Hash = "6d212f8fe98920d9e3bf801602686bd6"
+    Size = 663
+}
+
+BinaryFileEntry
+{
+    !UUID = "e31f4562-9509-4a2a-ad62-b61497d21f28"
+    Path = "Icons/Lucide/trash-2.svg"
+    Hash = "8a287da70c5aa7b47f5c8d802d403b1a"
+    Size = 467
+}
+
+BinaryFileEntry
+{
+    !UUID = "f7e42894-bec3-41c3-9f49-3565de752a1d"
+    Path = "Icons/Lucide/type.svg"
+    Hash = "3f6cdb29ed2cc5daba916999c21ab426"
+    Size = 385
+}
+
+BinaryFileEntry
+{
+    !UUID = "e46ec512-946e-41d0-add4-c6979c28aba3"
+    Path = "Icons/Lucide/x.svg"
+    Hash = "eb38dbac3337ccb2aca954c2f1f205d7"
+    Size = 332
+}

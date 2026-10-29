@@ -1,0 +1,16 @@
+/// The engine's default material (Documentation/Architecture/07 §4): a grey dielectric slab, what every mesh slot
+/// without a material of its own draws with (06 §3.5).
+namespace Marlin.Materials;
+
+using Marlin.Shading;
+
+[Material, Id("ef2b48e6-a831-4053-b260-725ce54ce3de")]
+public struct Default : ISurfaceMaterial
+{
+    [Color] public half3 BaseColor = half3(0.5h, 0.5h, 0.5h);
+    [Range(0, 1)] public half Roughness = 0.5h;
+    [Range(0, 1)] public half Metallic = 0.0h;
+
+    public Surface Evaluate(in SurfaceInputs input)
+        => Surface.FromSlab(Slab.Default with { Albedo = BaseColor, Roughness = Roughness, Metallic = Metallic });
+}

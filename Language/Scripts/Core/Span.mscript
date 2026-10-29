@@ -1,0 +1,190 @@
+/// Views of part of an array (MarlinScript §3.5, §10.1).
+namespace Marlin;
+
+/// A view of `Length` consecutive elements of an array, starting at an offset. It holds the array itself, not a
+/// pointer into it, so it can be stored anywhere and stays valid while the GC moves the array. Writes go to the array.
+public struct Span<T>
+{
+    internal T[] _array;
+    internal int _start;
+    internal int _length;
+
+    /// The elements `start..start + length` of *array*; a range outside it faults.
+    public Span(T[] array, int start, int length)
+    {
+        if (start < 0 || length < 0 || start + length > array.Length)
+        {
+            Panic($"elements {start}..{start + length} are outside an array of {array.Length}");
+        }
+        _array = array;
+        _start = start;
+        _length = length;
+    }
+
+    public int Length => _length;
+
+    public bool IsEmpty => _length == 0;
+
+    public T this[int index]
+    {
+        get
+        {
+            CheckIndex(index);
+            return _array[_start + index];
+        }
+        set
+        {
+            CheckIndex(index);
+            _array[_start + index] = value;
+        }
+    }
+
+    /// The elements from *start* to the end.
+    public Span<T> Slice(int start) => Slice(start, _length - start);
+
+    public Span<T> Slice(int start, int length)
+    {
+        if (start < 0 || length < 0 || start + length > _length)
+        {
+            Panic($"elements {start}..{start + length} are outside a span of {_length}");
+        }
+        return new Span<T>(_array, _start + start, length);
+    }
+
+    /// Copies the elements into *destination*, which must be at least as long; the two may overlap.
+    public void CopyTo(Span<T> destination)
+    {
+        if (destination._length < _length)
+        {
+            Panic($"a span of {destination._length} cannot hold {_length} elements");
+        }
+        if (_length > 0)
+        {
+            _array.CopyTo(_start, destination._array, destination._start, _length);
+        }
+    }
+
+    /// Sets every element to *value*.
+    public void Fill(T value)
+    {
+        for (int i = 0; i < _length; i++)
+        {
+            _array[_start + i] = value;
+        }
+    }
+
+    /// Sets every element to its zero value.
+    public void Clear()
+    {
+        if (_length > 0)
+        {
+            _array.Clear(_start, _length);
+        }
+    }
+
+    public T[] ToArray()
+    {
+        var result = new T[_length];
+        if (_length > 0)
+        {
+            _array.CopyTo(_start, result, 0, _length);
+        }
+        return result;
+    }
+
+    public ReadOnlySpan<T> AsReadOnly() => new ReadOnlySpan<T>(_array, _start, _length);
+
+    public SpanEnumerator<T> GetEnumerator() => new SpanEnumerator<T>(_array, _start, _length);
+
+    private void CheckIndex(int index)
+    {
+        if ((uint)index >= (uint)_length)
+        {
+            Panic($"index {index} is outside 0..{_length}");
+        }
+    }
+}
+
+/// A span that cannot write to its array.
+public struct ReadOnlySpan<T>
+{
+    internal T[] _array;
+    internal int _start;
+    internal int _length;
+
+    public ReadOnlySpan(T[] array, int start, int length)
+    {
+        if (start < 0 || length < 0 || start + length > array.Length)
+        {
+            Panic($"elements {start}..{start + length} are outside an array of {array.Length}");
+        }
+        _array = array;
+        _start = start;
+        _length = length;
+    }
+
+    public int Length => _length;
+
+    public bool IsEmpty => _length == 0;
+
+    public T this[int index]
+    {
+        get
+        {
+            if ((uint)index >= (uint)_length)
+            {
+                Panic($"index {index} is outside 0..{_length}");
+            }
+            return _array[_start + index];
+        }
+    }
+
+    public ReadOnlySpan<T> Slice(int start) => Slice(start, _length - start);
+
+    public ReadOnlySpan<T> Slice(int start, int length)
+    {
+        if (start < 0 || length < 0 || start + length > _length)
+        {
+            Panic($"elements {start}..{start + length} are outside a span of {_length}");
+        }
+        return new ReadOnlySpan<T>(_array, _start + start, length);
+    }
+
+    public void CopyTo(Span<T> destination)
+    {
+        new Span<T>(_array, _start, _length).CopyTo(destination);
+    }
+
+    public T[] ToArray() => new Span<T>(_array, _start, _length).ToArray();
+
+    public SpanEnumerator<T> GetEnumerator() => new SpanEnumerator<T>(_array, _start, _length);
+}
+
+/// Walks a span in order without allocating.
+public struct SpanEnumerator<T>
+{
+    private T[] _array;
+    private int _index;
+    private int _end;
+
+    public SpanEnumerator(T[] array, int start, int length)
+    {
+        _array = array;
+        _index = start - 1;
+        _end = start + length;
+    }
+
+    public bool MoveNext()
+    {
+        _index += 1;
+        return _index < _end;
+    }
+
+    public T Current => _array[_index];
+}
+
+/// The whole array as a span.
+public Span<T> AsSpan<T>(this T[] array) => new Span<T>(array, 0, array.Length);
+
+/// The elements `start..start + length` of the array as a span.
+public Span<T> AsSpan<T>(this T[] array, int start, int length) => new Span<T>(array, start, length);

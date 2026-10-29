@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "0aa28e65-5aa9-53a5-85f4-db81762e0828"
+    !Name = "list"
+    SourceFile = `source:list.svg#04d3300a-f37f-4d02-9d30-734f83ed369a`
+}

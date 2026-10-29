@@ -1,0 +1,75 @@
+/// Checks for script tests (MarlinScript §15): a failed check ends the test with an AssertFailed fault.
+namespace Marlin.Tests;
+
+public static class Assert
+{
+    /// Ends the test with an AssertFailed fault.
+    public static void Fail(string message)
+    {
+        AssertFailed(message);
+    }
+
+    public static void True(bool condition, string message = "expected true")
+    {
+        if (!condition)
+        {
+            Fail(message);
+        }
+    }
+
+    public static void False(bool condition, string message = "expected false")
+    {
+        if (condition)
+        {
+            Fail(message);
+        }
+    }
+
+    public static void Equal(int expected, int actual)
+    {
+        if (expected != actual)
+        {
+            Fail($"expected {expected}, got {actual}");
+        }
+    }
+
+    public static void Equal(long expected, long actual)
+    {
+        if (expected != actual)
+        {
+            Fail($"expected {expected}, got {actual}");
+        }
+    }
+
+    public static void Equal(float expected, float actual)
+    {
+        if (expected != actual)
+        {
+            Fail($"expected {expected}, got {actual}");
+        }
+    }
+
+    public static void Equal(double expected, double actual)
+    {
+        if (expected != actual)
+        {
+            Fail($"expected {expected}, got {actual}");
+        }
+    }
+
+    public static void Equal(bool expected, bool actual)
+    {
+        if (expected != actual)
+        {
+            Fail($"expected {expected}, got {actual}");
+        }
+    }
+
+    public static void Equal(string expected, string actual)
+    {
+        if (!expected.Equals(actual))
+        {
+            Fail($"expected \"{expected}\", got \"{actual}\"");
+        }
+    }
+}

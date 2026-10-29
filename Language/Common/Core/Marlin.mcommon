@@ -1,0 +1,210 @@
+/// The core library every dialect sees (MarlinLanguage.md §9.10, MarlinScript §1.3).
+namespace Marlin;
+
+/// Satisfied by bool, the integers and the floating-point types.
+[Builtin("IScalar")] public interface IScalar {}
+/// Satisfied by scalars and vectors.
+[Builtin("IScalarOrVector")] public interface IScalarOrVector {}
+/// Satisfied by integer and floating-point scalars and vectors.
+[Builtin("INumeric")] public interface INumeric {}
+/// Satisfied by integer scalars and vectors.
+[Builtin("IInteger")] public interface IInteger {}
+/// Satisfied by half, float and double scalars and vectors.
+[Builtin("IFloatingPoint")] public interface IFloatingPoint {}
+/// Satisfied by bool scalars and vectors.
+[Builtin("ILogical")] public interface ILogical {}
+
+/// `T.Zero` and `T.One` of the numeric scalars and vectors, for generic code over INumeric (§3.5).
+public extension<T> T where T : INumeric
+{
+    public static T Zero => (T)0;
+    public static T One => (T)1;
+}
+
+/// The declarations an attribute struct may be put on, as in `[Attribute(AttributeTargets.Field)]` (§3.7).
+[Flags]
+public enum AttributeTargets : uint
+{
+    Struct = 1,
+    Field = 2,
+    Function = 4,
+    Parameter = 8,
+    GenericParameter = 16,
+    Enum = 32,
+    Interface = 64,
+    All = Struct | Field | Function | Parameter | GenericParameter | Enum | Interface,
+}
+
+/// Satisfied by numeric scalars, and by the structs that declare it.
+[Builtin("IComparable")]
+public interface IComparable<T>
+{
+    /// Negative, zero or positive as this is less than, equal to or greater than *other*.
+    int CompareTo(T other);
+}
+
+/// The scalar of a scalar or vector type: `ScalarOf<half3>` is `half`.
+[Builtin("ScalarOf")] public struct ScalarOf<T> {}
+
+/// Orders two numeric scalars, so they satisfy IComparable.
+public int CompareTo<T>(this T a, T b) where T : INumeric, IScalar => a < b ? -1 : (a > b ? 1 : 0);
+
+/// Two to four components of a scalar type.
+[Builtin("Vector")] public struct Vector<T, int N> where T : IScalar {}
+/// R rows of C components of a numeric type.
+[Builtin("Matrix")] public struct Matrix<T, int R, int C> where T : INumeric {}
+
+/// The integers from Start up to but excluding End, for `foreach`.
+[Builtin("Range")]
+public struct Range
+{
+    public int Start;
+    public int End;
+    public Range(int start, int end) { Start = start; End = end; }
+}
+
+public using bool2 = Vector<bool, 2>;
+public using bool3 = Vector<bool, 3>;
+public using bool4 = Vector<bool, 4>;
+public using short2 = Vector<short, 2>;
+public using short3 = Vector<short, 3>;
+public using short4 = Vector<short, 4>;
+public using ushort2 = Vector<ushort, 2>;
+public using ushort3 = Vector<ushort, 3>;
+public using ushort4 = Vector<ushort, 4>;
+public using int2 = Vector<int, 2>;
+public using int3 = Vector<int, 3>;
+public using int4 = Vector<int, 4>;
+public using uint2 = Vector<uint, 2>;
+public using uint3 = Vector<uint, 3>;
+public using uint4 = Vector<uint, 4>;
+public using long2 = Vector<long, 2>;
+public using long3 = Vector<long, 3>;
+public using long4 = Vector<long, 4>;
+public using ulong2 = Vector<ulong, 2>;
+public using ulong3 = Vector<ulong, 3>;
+public using ulong4 = Vector<ulong, 4>;
+public using half2 = Vector<half, 2>;
+public using half3 = Vector<half, 3>;
+public using half4 = Vector<half, 4>;
+public using float2 = Vector<float, 2>;
+public using float3 = Vector<float, 3>;
+public using float4 = Vector<float, 4>;
+public using double2 = Vector<double, 2>;
+public using double3 = Vector<double, 3>;
+public using double4 = Vector<double, 4>;
+
+public using half2x2 = Matrix<half, 2, 2>;
+public using half2x3 = Matrix<half, 2, 3>;
+public using half2x4 = Matrix<half, 2, 4>;
+public using half3x2 = Matrix<half, 3, 2>;
+public using half3x3 = Matrix<half, 3, 3>;
+public using half3x4 = Matrix<half, 3, 4>;
+public using half4x2 = Matrix<half, 4, 2>;
+public using half4x3 = Matrix<half, 4, 3>;
+public using half4x4 = Matrix<half, 4, 4>;
+public using float2x2 = Matrix<float, 2, 2>;
+public using float2x3 = Matrix<float, 2, 3>;
+public using float2x4 = Matrix<float, 2, 4>;
+public using float3x2 = Matrix<float, 3, 2>;
+public using float3x3 = Matrix<float, 3, 3>;
+public using float3x4 = Matrix<float, 3, 4>;
+public using float4x2 = Matrix<float, 4, 2>;
+public using float4x3 = Matrix<float, 4, 3>;
+public using float4x4 = Matrix<float, 4, 4>;
+public using double2x2 = Matrix<double, 2, 2>;
+public using double3x3 = Matrix<double, 3, 3>;
+public using double4x4 = Matrix<double, 4, 4>;
+public using int2x2 = Matrix<int, 2, 2>;
+public using int3x3 = Matrix<int, 3, 3>;
+public using int4x4 = Matrix<int, 4, 4>;
+public using uint2x2 = Matrix<uint, 2, 2>;
+public using uint3x3 = Matrix<uint, 3, 3>;
+public using uint4x4 = Matrix<uint, 4, 4>;
+
+[Intrinsic("Abs")] public T Abs<T>(T x) where T : INumeric;
+[Intrinsic("Sign")] public T Sign<T>(T x) where T : INumeric;
+[Intrinsic("Min")] public T Min<T>(T a, T b) where T : INumeric;
+[Intrinsic("Max")] public T Max<T>(T a, T b) where T : INumeric;
+[Intrinsic("Clamp")] public T Clamp<T>(T x, T low, T high) where T : INumeric;
+
+[Intrinsic("Floor")] public T Floor<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Ceil")] public T Ceiling<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Round")] public T Round<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Trunc")] public T Truncate<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Fract")] public T Fract<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Sqrt")] public T Sqrt<T>(T x) where T : IFloatingPoint;
+[Intrinsic("InverseSqrt")] public T InverseSqrt<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Exp")] public T Exp<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Exp2")] public T Exp2<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Log")] public T Log<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Log2")] public T Log2<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Pow")] public T Pow<T>(T x, T y) where T : IFloatingPoint;
+[Intrinsic("Sin")] public T Sin<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Cos")] public T Cos<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Tan")] public T Tan<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Asin")] public T Asin<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Acos")] public T Acos<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Atan")] public T Atan<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Atan2")] public T Atan2<T>(T y, T x) where T : IFloatingPoint;
+[Intrinsic("Sinh")] public T Sinh<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Cosh")] public T Cosh<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Tanh")] public T Tanh<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Saturate")] public T Saturate<T>(T x) where T : IFloatingPoint;
+[Intrinsic("Lerp")] public T Lerp<T>(T a, T b, T t) where T : IFloatingPoint;
+[Intrinsic("Step")] public T Step<T>(T edge, T x) where T : IFloatingPoint;
+[Intrinsic("SmoothStep")] public T SmoothStep<T>(T edge0, T edge1, T x) where T : IFloatingPoint;
+[Intrinsic("Fma")] public T FusedMultiplyAdd<T>(T a, T b, T c) where T : IFloatingPoint;
+[Intrinsic("Ldexp")] public T Ldexp<T>(T x, T exponent) where T : IFloatingPoint;
+
+[Intrinsic("Dot")] public T Dot<T, int N>(Vector<T, N> a, Vector<T, N> b) where T : INumeric;
+[Intrinsic("Cross")] public Vector<T, 3> Cross<T>(Vector<T, 3> a, Vector<T, 3> b) where T : IFloatingPoint;
+[Intrinsic("Length")] public T Length<T, int N>(Vector<T, N> v) where T : IFloatingPoint;
+[Intrinsic("Distance")] public T Distance<T, int N>(Vector<T, N> a, Vector<T, N> b) where T : IFloatingPoint;
+[Intrinsic("Normalize")] public Vector<T, N> Normalize<T, int N>(Vector<T, N> v) where T : IFloatingPoint;
+[Intrinsic("Reflect")] public Vector<T, N> Reflect<T, int N>(Vector<T, N> i, Vector<T, N> n) where T : IFloatingPoint;
+[Intrinsic("Refract")] public Vector<T, N> Refract<T, int N>(Vector<T, N> i, Vector<T, N> n, T eta) where T : IFloatingPoint;
+[Intrinsic("FaceForward")] public Vector<T, N> FaceForward<T, int N>(Vector<T, N> n, Vector<T, N> i, Vector<T, N> ng) where T : IFloatingPoint;
+
+[Intrinsic("Determinant")] public T Determinant<T, int N>(Matrix<T, N, N> m) where T : IFloatingPoint;
+[Intrinsic("Inverse")] public Matrix<T, N, N> Inverse<T, int N>(Matrix<T, N, N> m) where T : IFloatingPoint;
+[Intrinsic("Transpose")] public Matrix<T, C, R> Transpose<T, int R, int C>(Matrix<T, R, C> m) where T : INumeric;
+
+[Intrinsic("IsNan")] public bool IsNaN<T>(T x) where T : IFloatingPoint, IScalar;
+[Intrinsic("IsNan")] public Vector<bool, N> IsNaN<T, int N>(Vector<T, N> x) where T : IFloatingPoint;
+[Intrinsic("IsInf")] public bool IsInfinity<T>(T x) where T : IFloatingPoint, IScalar;
+[Intrinsic("IsInf")] public Vector<bool, N> IsInfinity<T, int N>(Vector<T, N> x) where T : IFloatingPoint;
+[Intrinsic("Any")] public bool Any<int N>(Vector<bool, N> v);
+[Intrinsic("All")] public bool All<int N>(Vector<bool, N> v);
+public bool Any(bool v) => v;
+public bool All(bool v) => v;
+[Intrinsic("Select")] public T Select<T>(bool condition, T whenTrue, T whenFalse);
+[Intrinsic("Select")] public Vector<T, N> Select<T, int N>(Vector<bool, N> condition, Vector<T, N> whenTrue, Vector<T, N> whenFalse);
+
+[Intrinsic("CountBits")] public T PopCount<T>(T x) where T : IInteger;
+[Intrinsic("FirstBitHigh")] public T MostSignificantBit<T>(T x) where T : IInteger;
+[Intrinsic("FirstBitLow")] public T LeastSignificantBit<T>(T x) where T : IInteger;
+[Intrinsic("ReverseBits")] public T ReverseBits<T>(T x) where T : IInteger;
+
+[Intrinsic("Bitcast")] public float AsFloat(uint x);
+[Intrinsic("Bitcast")] public float AsFloat(int x);
+[Intrinsic("Bitcast")] public Vector<float, N> AsFloat<int N>(Vector<uint, N> x);
+[Intrinsic("Bitcast")] public Vector<float, N> AsFloat<int N>(Vector<int, N> x);
+[Intrinsic("Bitcast")] public uint AsUInt(float x);
+[Intrinsic("Bitcast")] public uint AsUInt(int x);
+[Intrinsic("Bitcast")] public Vector<uint, N> AsUInt<int N>(Vector<float, N> x);
+[Intrinsic("Bitcast")] public Vector<uint, N> AsUInt<int N>(Vector<int, N> x);
+[Intrinsic("Bitcast")] public int AsInt(float x);
+[Intrinsic("Bitcast")] public int AsInt(uint x);
+[Intrinsic("Bitcast")] public Vector<int, N> AsInt<int N>(Vector<float, N> x);
+[Intrinsic("Bitcast")] public Vector<int, N> AsInt<int N>(Vector<uint, N> x);
+// RECOVERY-DECISION lang-files-D2: the 64-bit bitcasts the script core library's GetHashCode(double) needs.
+[Intrinsic("Bitcast")] public long AsLong(double x);
+[Intrinsic("Bitcast")] public long AsLong(ulong x);
+[Intrinsic("Bitcast")] public ulong AsULong(double x);
+[Intrinsic("Bitcast")] public ulong AsULong(long x);
+[Intrinsic("Bitcast")] public double AsDouble(long x);
+[Intrinsic("Bitcast")] public double AsDouble(ulong x);
+
+[Intrinsic("PackHalf2x16")] public uint PackHalf2x16(float2 v);
+[Intrinsic("UnpackHalf2x16")] public float2 UnpackHalf2x16(uint packed);

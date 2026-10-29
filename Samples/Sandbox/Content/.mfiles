@@ -1,0 +1,25 @@
+!Version "1.0"
+
+BinaryFileEntry
+{
+    !UUID = "8748d842-855b-435e-bc1c-da1498ea575b"
+    Path = "Scene/Shapes.gltf"
+    Hash = "414579cb4910512a548f9242a8fcb2c5"
+    Size = 405927
+}
+
+BinaryFileEntry
+{
+    !UUID = "6e9b2d41-7c35-4f8a-b0e6-2a1d9c4f8b53"
+    Path = "Textured/Textured.gltf"
+    Hash = "a07a8a1ab075ed30545a762aea6449f3"
+    Size = 82072
+}
+
+BinaryFileEntry
+{
+    !UUID = "3c1f7a52-9d84-4e6b-a1c3-5b2e8f0d6a17"
+    Path = "Textured/Tiles.png"
+    Hash = "9826b7a500c71e4ea985be0f0ad9d63e"
+    Size = 6052324
+}

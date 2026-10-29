@@ -1,0 +1,19 @@
+/// A stone tile floor for Sandbox: a color texture repeated Tiling times across the mesh's UVs, which streams its
+/// mips as the view needs them (Documentation/Architecture/07 §4.4).
+namespace Sandbox.Materials;
+
+using Marlin.Shading;
+
+[Material, Id("f9c1b6d3-70c4-41e8-936a-be5f8a4c7bc6")]
+public struct Tiled : ISurfaceMaterial
+{
+    public MaterialTexture2D<half4> BaseColor = DefaultTextures.White;
+    [Range(0.25, 64)] public half Tiling = 4.0h;
+    [Range(0, 1)] public half Roughness = 0.65h;
+
+    public Surface Evaluate(in SurfaceInputs input)
+    {
+        half4 albedo = BaseColor.Sample(input.Uv0 * (float)Tiling);
+        return Surface.FromSlab(Slab.Default with { Albedo = albedo.xyz, Roughness = Roughness });
+    }
+}

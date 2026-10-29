@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "9d7bd37d-658a-5e9b-8e9a-06bb953e2167"
+    !Name = "history"
+    SourceFile = `source:history.svg#2bf501d2-86be-488d-bb1d-ab255f777aa4`
+}

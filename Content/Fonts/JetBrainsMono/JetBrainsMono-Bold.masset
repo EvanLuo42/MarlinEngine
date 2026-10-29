@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "20905f18-bfb2-4aad-a637-7a37ad6f4c30"
+    !Name = "JetBrainsMono-Bold"
+    SourceFile = `source:JetBrainsMono-Bold.ttf#975d9940-7432-4ba3-bfb6-d4b2a1b0536b`
+    FaceIndex = 0
+}

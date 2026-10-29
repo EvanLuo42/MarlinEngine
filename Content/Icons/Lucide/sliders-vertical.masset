@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "e5992999-eef6-5c31-b63c-1b72c4aaab97"
+    !Name = "sliders-vertical"
+    SourceFile = `source:sliders-vertical.svg#3ce1b51d-e3f8-41e7-aa60-607d5d1f0a63`
+}

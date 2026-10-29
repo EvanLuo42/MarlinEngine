@@ -1,0 +1,393 @@
+/// Hash tables (MarlinScript §10.1). Keys are compared with `Equals` and hashed with `GetHashCode`: the virtual members
+/// of object for classes, the core library's for scalars and strings, and a struct's own `Equals(T)` and
+/// `GetHashCode()`.
+namespace Marlin.Collections;
+
+/// A key and its value, as a dictionary enumerates them.
+public struct KeyValuePair<TKey, TValue>
+{
+    public TKey Key;
+    public TValue Value;
+
+    public KeyValuePair(TKey key, TValue value)
+    {
+        Key = key;
+        Value = value;
+    }
+}
+
+/// Maps keys to values. Lookups, insertions and removals are O(1) on average; enumeration follows insertion order
+/// until an entry is removed, after which new entries fill the freed places.
+public sealed class Dictionary<TKey, TValue>
+{
+    internal HashTable<TKey> _table;
+    internal TValue[] _values;
+
+    public Dictionary()
+    {
+        _table = new HashTable<TKey>(0);
+        _values = new TValue[0];
+    }
+
+    public Dictionary(int capacity)
+    {
+        _table = new HashTable<TKey>(capacity);
+        _values = new TValue[_table.Capacity];
+    }
+
+    public int Count => _table.Count;
+
+    /// The value of *key*; reading a missing key faults.
+    public TValue this[TKey key]
+    {
+        get
+        {
+            int entry = _table.Find(key);
+            if (entry < 0)
+            {
+                Panic("the key is not in the dictionary");
+            }
+            return _values[entry];
+        }
+        set
+        {
+            int entry = _table.Find(key);
+            if (entry < 0)
+            {
+                entry = Insert(key);
+            }
+            _values[entry] = value;
+        }
+    }
+
+    /// Adds *key*; adding a key that is already present faults.
+    public void Add(TKey key, TValue value)
+    {
+        if (!TryAdd(key, value))
+        {
+            Panic("the key is already in the dictionary");
+        }
+    }
+
+    /// Adds *key* unless it is already present.
+    public bool TryAdd(TKey key, TValue value)
+    {
+        if (_table.Find(key) >= 0)
+        {
+            return false;
+        }
+        // RECOVERY-DECISION S13 (script workspace): Insert may replace _values, so the entry is found first.
+        int entry = Insert(key);
+        _values[entry] = value;
+        return true;
+    }
+
+    public bool ContainsKey(TKey key) => _table.Find(key) >= 0;
+
+    public bool TryGetValue(TKey key, out TValue value)
+    {
+        int entry = _table.Find(key);
+        if (entry < 0)
+        {
+            value = default!;
+            return false;
+        }
+        value = _values[entry];
+        return true;
+    }
+
+    public TValue GetValueOrDefault(TKey key, TValue fallback)
+    {
+        int entry = _table.Find(key);
+        return entry < 0 ? fallback : _values[entry];
+    }
+
+    public bool Remove(TKey key)
+    {
+        int entry = _table.Remove(key);
+        if (entry < 0)
+        {
+            return false;
+        }
+        _values.Clear(entry, 1);
+        return true;
+    }
+
+    public void Clear()
+    {
+        _values.Clear(0, _table.End);
+        _table.Clear();
+    }
+
+    public DictionaryEnumerator<TKey, TValue> GetEnumerator() => new DictionaryEnumerator<TKey, TValue>(this);
+
+    private int Insert(TKey key)
+    {
+        int entry = _table.Insert(key);
+        if (_values.Length < _table.Capacity)
+        {
+            var values = new TValue[_table.Capacity];
+            _values.CopyTo(0, values, 0, _values.Length);
+            _values = values;
+        }
+        return entry;
+    }
+}
+
+/// Walks a dictionary's entries without allocating.
+public struct DictionaryEnumerator<TKey, TValue>
+{
+    private Dictionary<TKey, TValue> _dictionary;
+    private int _entry;
+
+    public DictionaryEnumerator(Dictionary<TKey, TValue> dictionary)
+    {
+        _dictionary = dictionary;
+        _entry = -1;
+    }
+
+    public bool MoveNext()
+    {
+        _entry = _dictionary._table.NextUsed(_entry);
+        return _entry >= 0;
+    }
+
+    public KeyValuePair<TKey, TValue> Current =>
+        new KeyValuePair<TKey, TValue>(_dictionary._table._keys[_entry], _dictionary._values[_entry]);
+}
+
+/// A set of distinct values, with O(1) average Add, Contains and Remove.
+public sealed class HashSet<T>
+{
+    internal HashTable<T> _table;
+
+    public HashSet()
+    {
+        _table = new HashTable<T>(0);
+    }
+
+    public HashSet(int capacity)
+    {
+        _table = new HashTable<T>(capacity);
+    }
+
+    public int Count => _table.Count;
+
+    /// Adds *item*; false if it was already present.
+    public bool Add(T item)
+    {
+        if (_table.Find(item) >= 0)
+        {
+            return false;
+        }
+        _table.Insert(item);
+        return true;
+    }
+
+    public bool Contains(T item) => _table.Find(item) >= 0;
+
+    public bool Remove(T item) => _table.Remove(item) >= 0;
+
+    public void Clear()
+    {
+        _table.Clear();
+    }
+
+    public HashSetEnumerator<T> GetEnumerator() => new HashSetEnumerator<T>(this);
+}
+
+/// Walks a set without allocating.
+public struct HashSetEnumerator<T>
+{
+    private HashSet<T> _set;
+    private int _entry;
+
+    public HashSetEnumerator(HashSet<T> set)
+    {
+        _set = set;
+        _entry = -1;
+    }
+
+    public bool MoveNext()
+    {
+        _entry = _set._table.NextUsed(_entry);
+        return _entry >= 0;
+    }
+
+    public T Current => _set._table._keys[_entry];
+}
+
+/// The hash table under Dictionary and HashSet: power-of-two buckets heading chains of entries, with removed entries
+/// on a free list. Entry indices stay stable until Clear, so callers keep parallel arrays indexed by them.
+internal sealed class HashTable<TKey>
+{
+    internal TKey[] _keys;
+    /// Per entry: the next entry of its chain, -1 at the end, or -3 - (next free entry) when free.
+    // RECOVERY-DECISION S14 (script workspace): -3, not -2, so the last free entry (next -1) is not taken for a used
+    // one by NextUsed.
+    private int[] _next;
+    private int[] _hashes;
+    /// Per bucket: its first entry + 1, or 0.
+    private int[] _buckets;
+    private int _shift;
+    private int _count;
+    /// Entries ever used since Clear; entries at and past it are unused.
+    private int _end;
+    private int _free;
+
+    public HashTable(int capacity)
+    {
+        int buckets = 4;
+        _shift = 30;
+        while (buckets < capacity)
+        {
+            buckets *= 2;
+            _shift -= 1;
+        }
+        Allocate(capacity == 0 ? 0 : buckets);
+    }
+
+    public int Count => _count;
+
+    public int Capacity => _keys.Length;
+
+    public int End => _end;
+
+    /// The entry of *key*, or -1.
+    public int Find(TKey key)
+    {
+        if (_count == 0)
+        {
+            return -1;
+        }
+        int hash = key.GetHashCode();
+        int entry = _buckets[Bucket(hash)] - 1;
+        while (entry >= 0)
+        {
+            if (_hashes[entry] == hash && _keys[entry].Equals(key))
+            {
+                return entry;
+            }
+            entry = _next[entry];
+        }
+        return -1;
+    }
+
+    /// Adds *key*, which must not be present, and returns its entry; Capacity may grow.
+    public int Insert(TKey key)
+    {
+        int entry;
+        if (_free >= 0)
+        {
+            entry = _free;
+            _free = -3 - _next[entry];
+        }
+        else
+        {
+            if (_end == _keys.Length)
+            {
+                Grow();
+            }
+            entry = _end;
+            _end += 1;
+        }
+        int hash = key.GetHashCode();
+        int bucket = Bucket(hash);
+        _keys[entry] = key;
+        _hashes[entry] = hash;
+        _next[entry] = _buckets[bucket] - 1;
+        _buckets[bucket] = entry + 1;
+        _count += 1;
+        return entry;
+    }
+
+    /// Removes *key* and returns the entry it had, or -1 if it was not present.
+    public int Remove(TKey key)
+    {
+        if (_count == 0)
+        {
+            return -1;
+        }
+        int hash = key.GetHashCode();
+        int bucket = Bucket(hash);
+        int previous = -1;
+        int entry = _buckets[bucket] - 1;
+        while (entry >= 0)
+        {
+            if (_hashes[entry] == hash && _keys[entry].Equals(key))
+            {
+                if (previous < 0)
+                {
+                    _buckets[bucket] = _next[entry] + 1;
+                }
+                else
+                {
+                    _next[previous] = _next[entry];
+                }
+                _keys.Clear(entry, 1);
+                _next[entry] = -3 - _free;
+                _free = entry;
+                _count -= 1;
+                return entry;
+            }
+            previous = entry;
+            entry = _next[entry];
+        }
+        return -1;
+    }
+
+    /// The first used entry after *entry*, or -1.
+    public int NextUsed(int entry)
+    {
+        entry += 1;
+        while (entry < _end)
+        {
+            if (_next[entry] >= -1)
+            {
+                return entry;
+            }
+            entry += 1;
+        }
+        return -1;
+    }
+
+    public void Clear()
+    {
+        _keys.Clear(0, _end);
+        _buckets.Clear(0, _buckets.Length);
+        _count = 0;
+        _end = 0;
+        _free = -1;
+    }
+
+    private int Bucket(int hash) => (int)(((uint)hash * 0x9E3779B1u) >> _shift);
+
+    private void Allocate(int capacity)
+    {
+        _keys = new TKey[capacity];
+        _next = new int[capacity];
+        _hashes = new int[capacity];
+        _buckets = new int[capacity];
+        _free = -1;
+    }
+
+    private void Grow()
+    {
+        int capacity = _keys.Length < 4 ? 4 : _keys.Length * 2;
+        if (_keys.Length >= 4)
+        {
+            _shift -= 1;
+        }
+        TKey[] keys = _keys;
+        int[] hashes = _hashes;
+        Allocate(capacity);
+        keys.CopyTo(0, _keys, 0, _end);
+        hashes.CopyTo(0, _hashes, 0, _end);
+        for (int entry = 0; entry < _end; entry++)
+        {
+            int bucket = Bucket(_hashes[entry]);
+            _next[entry] = _buckets[bucket] - 1;
+            _buckets[bucket] = entry + 1;
+        }
+    }
+}

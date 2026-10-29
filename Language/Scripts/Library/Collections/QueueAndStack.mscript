@@ -1,0 +1,205 @@
+/// First-in-first-out and last-in-first-out collections (MarlinScript §10.1).
+namespace Marlin.Collections;
+
+/// A last-in-first-out stack over a growable array.
+public sealed class Stack<T>
+{
+    internal T[] _items;
+    internal int _count;
+
+    public Stack()
+    {
+        _items = new T[0];
+    }
+
+    public Stack(int capacity)
+    {
+        _items = new T[capacity];
+    }
+
+    public int Count => _count;
+
+    public void Push(T item)
+    {
+        if (_count == _items.Length)
+        {
+            var items = new T[_count < 4 ? 4 : _count * 2];
+            _items.CopyTo(0, items, 0, _count);
+            _items = items;
+        }
+        _items[_count] = item;
+        _count += 1;
+    }
+
+    /// Removes and returns the top item; popping an empty stack faults.
+    public T Pop()
+    {
+        if (_count == 0)
+        {
+            Panic("the stack is empty");
+        }
+        _count -= 1;
+        T item = _items[_count];
+        _items.Clear(_count, 1);
+        return item;
+    }
+
+    /// The top item; peeking at an empty stack faults.
+    public T Peek()
+    {
+        if (_count == 0)
+        {
+            Panic("the stack is empty");
+        }
+        return _items[_count - 1];
+    }
+
+    public bool TryPop(out T item)
+    {
+        if (_count == 0)
+        {
+            item = default!;
+            return false;
+        }
+        item = Pop();
+        return true;
+    }
+
+    public void Clear()
+    {
+        _items.Clear(0, _count);
+        _count = 0;
+    }
+
+    /// Walks from the top of the stack to the bottom.
+    public StackEnumerator<T> GetEnumerator() => new StackEnumerator<T>(this);
+}
+
+public struct StackEnumerator<T>
+{
+    private Stack<T> _stack;
+    private int _index;
+
+    public StackEnumerator(Stack<T> stack)
+    {
+        _stack = stack;
+        _index = stack._count;
+    }
+
+    public bool MoveNext()
+    {
+        _index -= 1;
+        return _index >= 0;
+    }
+
+    public T Current => _stack._items[_index];
+}
+
+/// A first-in-first-out queue over a ring buffer.
+public sealed class Queue<T>
+{
+    internal T[] _items;
+    internal int _head;
+    internal int _count;
+
+    public Queue()
+    {
+        _items = new T[0];
+    }
+
+    public Queue(int capacity)
+    {
+        _items = new T[capacity];
+    }
+
+    public int Count => _count;
+
+    public void Enqueue(T item)
+    {
+        if (_count == _items.Length)
+        {
+            Grow();
+        }
+        _items[(_head + _count) % _items.Length] = item;
+        _count += 1;
+    }
+
+    /// Removes and returns the oldest item; dequeuing from an empty queue faults.
+    public T Dequeue()
+    {
+        if (_count == 0)
+        {
+            Panic("the queue is empty");
+        }
+        T item = _items[_head];
+        _items.Clear(_head, 1);
+        _head = (_head + 1) % _items.Length;
+        _count -= 1;
+        return item;
+    }
+
+    /// The oldest item; peeking at an empty queue faults.
+    public T Peek()
+    {
+        if (_count == 0)
+        {
+            Panic("the queue is empty");
+        }
+        return _items[_head];
+    }
+
+    public bool TryDequeue(out T item)
+    {
+        if (_count == 0)
+        {
+            item = default!;
+            return false;
+        }
+        item = Dequeue();
+        return true;
+    }
+
+    public void Clear()
+    {
+        _items.Clear(0, _items.Length);
+        _head = 0;
+        _count = 0;
+    }
+
+    /// Walks from the oldest item to the newest.
+    public QueueEnumerator<T> GetEnumerator() => new QueueEnumerator<T>(this);
+
+    private void Grow()
+    {
+        var items = new T[_count < 4 ? 4 : _count * 2];
+        int first = _items.Length - _head;
+        if (first > _count)
+        {
+            first = _count;
+        }
+        _items.CopyTo(_head, items, 0, first);
+        _items.CopyTo(0, items, first, _count - first);
+        _items = items;
+        _head = 0;
+    }
+}
+
+public struct QueueEnumerator<T>
+{
+    private Queue<T> _queue;
+    private int _index;
+
+    public QueueEnumerator(Queue<T> queue)
+    {
+        _queue = queue;
+        _index = -1;
+    }
+
+    public bool MoveNext()
+    {
+        _index += 1;
+        return _index < _queue._count;
+    }
+
+    public T Current => _queue._items[(_queue._head + _index) % _queue._items.Length];
+}

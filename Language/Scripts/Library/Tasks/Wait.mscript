@@ -1,0 +1,61 @@
+/// Waiting helpers built on Task and Frame (MarlinScript §4.2, §10.1).
+namespace Marlin.Tasks;
+
+/// Common ways for a task to wait. Times are World time, which pauses and scales.
+public static class Wait
+{
+    /// Resumes after *count* frames; zero resumes at once.
+    public static async Task Frames(int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            await Frame.Next();
+        }
+    }
+
+    /// Resumes when *condition* holds or *timeoutSeconds* have passed; true if the condition held.
+    public static async Task<bool> Until(Func<bool> condition, float timeoutSeconds)
+    {
+        if (condition())
+        {
+            return true;
+        }
+        Task until = Frame.Until(condition);
+        Task delay = Frame.Delay(timeoutSeconds);
+        await Task.WhenAny(new Task[] { until, delay });
+        bool met = until.IsCompleted;
+        (met ? delay : until).Cancel();
+        return met;
+    }
+
+    /// Resumes when *task* ends or *timeoutSeconds* have passed; true if the task ended. The task keeps running
+    /// after a timeout unless the caller cancels it.
+    public static async Task<bool> For(Task task, float timeoutSeconds)
+    {
+        if (task.IsCompleted)
+        {
+            return true;
+        }
+        Task delay = Frame.Delay(timeoutSeconds);
+        await Task.WhenAny(new Task[] { task, delay });
+        if (task.IsCompleted)
+        {
+            delay.Cancel();
+            return true;
+        }
+        return false;
+    }
+
+    /// Calls *step* every *intervalSeconds* until it returns false; the first call is after one interval.
+    public static async Task Every(float intervalSeconds, Func<bool> step)
+    {
+        while (true)
+        {
+            await Frame.Delay(intervalSeconds);
+            if (!step())
+            {
+                return;
+            }
+        }
+    }
+}

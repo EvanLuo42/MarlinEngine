@@ -1,0 +1,108 @@
+/// The command stream of UIPainter as the tile passes read it (Documentation/Architecture/09 §2). Mirrors
+/// Source/Runtime/UIPainter/Public/UIPainter/UICommandList.h; keep both in step.
+namespace Marlin.Passes.Ui;
+
+const uint TileSize = 16;
+/// Commands a tile sorts in groupshared memory; more are dropped.
+const uint MaxTileCommands = 4096;
+
+const uint KindRoundedRect = 0;
+const uint KindEllipse = 1;
+const uint KindBoxShadow = 2;
+const uint KindStrokeLine = 3;
+const uint KindStrokeQuad = 4;
+const uint KindDisk = 5;
+const uint KindPolygon = 6;
+const uint KindOutline = 7;
+const uint KindGlyph = 8;
+const uint KindAtlasGlyph = 9;
+const uint KindImage = 10;
+const uint KindCanvas = 11;
+const uint KindBackdrop = 12;
+
+const uint FlagEvenOdd = 1;
+const uint FlagGlyphCache = 2;
+const uint FlagPointSampling = 4;
+const uint FlagFrameSlot = 8;
+
+const uint BrushSolid = 0;
+const uint BrushLinear = 1;
+const uint BrushRadial = 2;
+const uint BrushSweep = 3;
+
+/// How the raster pass writes its target.
+const uint EncodeLinear = 0;
+const uint EncodeSrgb = 1;
+const uint EncodePq = 2;
+
+public struct UiCommand
+{
+    public uint Header;
+    public uint Brush;
+    public uint Clip;
+    public uint Transform;
+    public uint Group;
+    public float[4] Bounds;
+    public float[11] Data;
+}
+
+public struct UiBrush
+{
+    public uint Kind;
+    public uint StopOffset;
+    public uint StopCount;
+    public uint Pad;
+    public float4 Color;
+    public float[8] Geometry;
+}
+
+public struct UiGradientStop
+{
+    public float Offset;
+    public float Pad0;
+    public float Pad1;
+    public float Pad2;
+    public float4 Color;
+}
+
+public struct UiTransform
+{
+    public float M11;
+    public float M12;
+    public float M21;
+    public float M22;
+    public float Dx;
+    public float Dy;
+    public float PixelSize;
+    public float Pad;
+}
+
+public struct UiClip
+{
+    public float4 DeviceRect;
+    public float4 Rect;
+    public float4 Radii;
+    public uint Transform;
+    public uint Parent;
+    public uint Shaped;
+    public uint Pad;
+}
+
+public struct UiCurve
+{
+    public float2 P0;
+    public float2 P1;
+    public float2 P2;
+}
+
+/// A tile range of one command: x0 y0 x1 y1 in tiles, x1 and y1 exclusive.
+public struct UiTileRect
+{
+    public uint X0;
+    public uint Y0;
+    public uint X1;
+    public uint Y1;
+}
+
+uint KindOf(UiCommand command) => command.Header & 0xFFu;
+uint FlagsOf(UiCommand command) => (command.Header >> 8) & 0xFFu;

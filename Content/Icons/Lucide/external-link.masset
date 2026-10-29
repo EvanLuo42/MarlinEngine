@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "c84aee84-a97e-5f75-b7ca-9953b0723069"
+    !Name = "external-link"
+    SourceFile = `source:external-link.svg#21dbf516-eddb-4a53-9c56-751f344b7dfd`
+}

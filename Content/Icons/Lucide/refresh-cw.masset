@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "b90bed84-e8c2-5651-8a38-44628929487a"
+    !Name = "refresh-cw"
+    SourceFile = `source:refresh-cw.svg#6a3cbe41-f2f4-4d68-8238-690227c304af`
+}

@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "4a345ed2-ab15-4df4-9670-b428bf40728b"
+    !Name = "Inter-SemiBold"
+    SourceFile = `source:Inter-SemiBold.ttf#62c0dcf6-5046-45db-8376-838f4cebeef5`
+    FaceIndex = 0
+}

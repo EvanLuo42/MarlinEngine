@@ -1,0 +1,48 @@
+/// Rasterizes the glyphs the glyph cache queued into their atlas slots (Documentation/Architecture/09 §2) with the same outline
+/// coverage the tile rasterizer uses, so atlas text and outline text match. One group per glyph.
+namespace Marlin.Passes.Ui;
+
+public struct UiAtlasGlyph
+{
+    /// The glyph's outline record in the glyph cache, in ems.
+    public uint Record;
+    public uint X;
+    public uint Y;
+    public uint Width;
+    public uint Height;
+    /// Atlas pixels per em.
+    public float Scale;
+    /// Where the glyph's origin falls in its slot, subpixel phase included.
+    public float OriginX;
+    public float OriginY;
+    /// Coverage is raised to this power: below 1 darkens stems at small sizes.
+    public float Gamma;
+}
+
+public struct UiGlyphAtlasArguments
+{
+    public Span<UiAtlasGlyph> Glyphs;
+    public Span<UiCurve> GlyphCurves;
+    public Span<uint> GlyphWords;
+    public Texture2D<float, Access.ReadWrite, ImageFormat.R8Unorm> Atlas;
+    public uint GlyphCount;
+}
+
+[Compute(16, 16, 1)]
+void RasterGlyphs([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in UiGlyphAtlasArguments args)
+{
+    if (group.x >= args.GlyphCount)
+    {
+        return;
+    }
+    UiAtlasGlyph glyph = args.Glyphs[group.x];
+    for (uint y = thread.y; y < glyph.Height; y += 16)
+    {
+        for (uint x = thread.x; x < glyph.Width; x += 16)
+        {
+            float2 em = (float2((float)x, (float)y) + float2(0.5, 0.5) - float2(glyph.OriginX, glyph.OriginY)) / glyph.Scale;
+            float coverage = OutlineCoverage(args.GlyphWords, args.GlyphCurves, glyph.Record, em, 1.0 / glyph.Scale, false);
+            args.Atlas.Store(int2((int)(glyph.X + x), (int)(glyph.Y + y)), Pow(Saturate(coverage), glyph.Gamma));
+        }
+    }
+}

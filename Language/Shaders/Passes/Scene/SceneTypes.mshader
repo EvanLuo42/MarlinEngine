@@ -1,0 +1,284 @@
+/// The GPU Scene as the scene passes read it (Documentation/Architecture/07 §5.2, §5.3). Mirrors
+/// Source/Runtime/SceneRenderer/Public/SceneRenderer/SceneGpuTypes.h; keep both in step.
+namespace Marlin.Passes.Scene;
+
+/// Metres per tile of the large-coordinate split: a position is a whole number of tiles plus a float offset.
+const float TileSize = 1024;
+
+/// A visibility value is the depth in its high word and, in its low word, the visible cluster above the triangle.
+const uint TriangleBits = 7;
+const uint TriangleMask = 127;
+/// The most visible clusters a view lists: what the 25 bits above the triangle can name.
+const uint MaxVisibleClusters = 33554432;
+
+/// A page table entry of a page that is not resident.
+const uint NotResident = 4294967295;
+/// Cluster records each page slot holds in the cluster pool.
+const uint SlotClusters = 256;
+
+/// One slot of the instance buffer. A free slot has Mesh = InvalidMesh.
+public struct SceneInstance
+{
+    public int TileX;
+    public int TileY;
+    public int TileZ;
+    public uint Mesh;
+    /// The rotation quaternion, xyz then w.
+    public float4 Rotation;
+    public float OffsetX;
+    public float OffsetY;
+    public float OffsetZ;
+    public uint Flags;
+    public float ScaleX;
+    public float ScaleY;
+    public float ScaleZ;
+    /// Its material binding: 0 for its mesh's default materials (SceneRendererSubsystem::AcquireMaterialBinding).
+    public uint Materials;
+}
+
+const uint InvalidMesh = 4294967295;
+
+/// A mesh of the geometry pool: where its hierarchy, groups and pages are. DepthCount is zero until its root pages are
+/// resident.
+public struct SceneMesh
+{
+    public uint FirstNode;
+    /// Nodes FirstNode to FirstNode + DepthCount - 1 are the roots of the per-depth trees.
+    public uint DepthCount;
+    public uint FirstGroup;
+    public uint FirstPage;
+    /// The bounding sphere in mesh space: center, radius.
+    public float4 Sphere;
+    /// Its sections' material slots in the section table, from here on.
+    public uint FirstSection;
+    /// The bytes of a vertex's attributes and their layout: the UV count in bits 0-3, bit 4 tangents, bit 5 colors.
+    public uint AttributeStride;
+    public uint AttributeLayout;
+    public uint Pad;
+}
+
+/// A node of a mesh's hierarchy: bounds with the worst error below, and a group (a leaf) or children of the mesh.
+public struct SceneNode
+{
+    public float4 Sphere;
+    public float Error;
+    /// The mesh's group of a leaf, or -1.
+    public int Group;
+    public uint FirstChild;
+    public uint ChildCount;
+}
+
+/// A group of a mesh's DAG: the bounds and error of what it simplifies into, and its clusters in its page.
+public struct SceneGroup
+{
+    public float4 Sphere;
+    public float Error;
+    /// The mesh's page.
+    public uint Page;
+    /// The first of its clusters in the page's records in the low 16 bits, how many in the high 16.
+    public uint ClusterRange;
+    /// Its level in the DAG, 0 for the source triangles' groups.
+    public uint Depth;
+}
+
+/// A resident cluster: where its vertices and triangles are in the geometry pool, in bytes.
+public struct SceneCluster
+{
+    public uint VertexOffset;
+    public uint IndexOffset;
+    /// VertexCount in bits 0-8, TriangleCount from bit 9.
+    public uint Counts;
+    /// The cluster's section of its mesh: its material slot is the mesh's section table's.
+    public uint Section;
+    /// The mesh's position grid in metres.
+    public float PositionStep;
+    /// The mesh's group whose simplification produced the cluster, or -1.
+    public int RefinedGroup;
+    public uint Group;
+    /// The longest triangle edge in mesh space.
+    public float MaxEdgeLength;
+    /// The bounding sphere in mesh space: center, radius.
+    public float4 Sphere;
+    /// The backface cone in mesh space: axis, cutoff (1 or more for none).
+    public float4 Cone;
+    /// The packed positions' corner on the grid, and their bits per axis (x in bits 0-7, y 8-15, z 16-23) with the
+    /// flags from bit 24 (ClusterTwoSided).
+    public int PositionMinX;
+    public int PositionMinY;
+    public int PositionMinZ;
+    public uint PositionBits;
+}
+
+public extension SceneCluster
+{
+    public uint VertexCount => this.Counts & 511;
+    public uint TriangleCount => this.Counts >> 9;
+}
+
+/// SceneCluster::PositionBits flag: the material is two-sided, so back faces are not culled.
+const uint ClusterTwoSided = 16777216;
+
+bool IsTwoSided(SceneCluster cluster)
+{
+    return (cluster.PositionBits & ClusterTwoSided) != 0;
+}
+
+/// An entry of a view's visible cluster list.
+public struct SceneVisibleCluster
+{
+    public uint Instance;
+    public uint Cluster;
+}
+
+/// A view's camera: its basis with the projection scales in w, and its position split like an instance's.
+/// Projection is reversed-Z with an infinite far plane: depth is Near over the distance along Forward.
+public struct SceneViewData
+{
+    /// xyz the camera's right, w the horizontal projection scale.
+    public float4 Right;
+    /// xyz the camera's up, w the vertical projection scale.
+    public float4 Up;
+    /// xyz the direction the camera looks, w the near plane.
+    public float4 Forward;
+    public int TileX;
+    public int TileY;
+    public int TileZ;
+    public uint Width;
+    public float OffsetX;
+    public float OffsetY;
+    public float OffsetZ;
+    public uint Height;
+}
+
+float3 RotateByQuaternion(float4 q, float3 v)
+{
+    float3 t = 2 * Cross(q.xyz, v);
+    return v + q.w * t + Cross(q.xyz, t);
+}
+
+/// The world position of mesh-space *local* of *instance*, relative to the camera of *view*, in metres.
+float3 ToCameraRelative(SceneInstance instance, SceneViewData view, float3 local)
+{
+    float3 tiles = float3((float)(instance.TileX - view.TileX), (float)(instance.TileY - view.TileY),
+                          (float)(instance.TileZ - view.TileZ));
+    float3 offset = float3(instance.OffsetX - view.OffsetX, instance.OffsetY - view.OffsetY,
+                           instance.OffsetZ - view.OffsetZ);
+    float3 scale = float3(instance.ScaleX, instance.ScaleY, instance.ScaleZ);
+    return tiles * TileSize + offset + RotateByQuaternion(instance.Rotation, local * scale);
+}
+
+float4 ToClip(SceneViewData view, float3 relative)
+{
+    float distance = Dot(relative, view.Forward.xyz);
+    return float4(Dot(relative, view.Right.xyz) * view.Right.w, Dot(relative, view.Up.xyz) * view.Up.w,
+                  view.Forward.w, distance);
+}
+
+/// *count* bits (at most 31) of the packed words at *base*, from bit *bit*; the words are padded so that the one after
+/// the last can always be read.
+uint ReadBits(Ptr<byte> geometry, uint base, uint bit, uint count)
+{
+    uint address = base + (bit >> 5) * 4;
+    uint low = geometry.Read<uint>(address);
+    uint high = geometry.Read<uint>(address + 4);
+    // A funnel shift in 32 bits: 64-bit shifts are emulated on most GPUs.
+    uint shift = bit & 31;
+    uint value = shift == 0 ? low : (low >> shift) | (high << (32 - shift));
+    return value & ((1u << count) - 1u);
+}
+
+/// A vertex's attributes in mesh space, as Material Resolve interpolates them.
+public struct SceneVertexAttributes
+{
+    public float3 Normal;
+    /// The tangent, and the bitangent sign in w; zero without tangents.
+    public float4 Tangent;
+    public float2 Uv0;
+    public float2 Uv1;
+    /// White without colors.
+    public float4 Color;
+}
+
+/// The signed 16 bits of *word* from bit *shift* on, as a snorm in [-1, 1].
+float Snorm16(uint word, uint shift)
+{
+    int value = ((int)(word << (16 - shift))) >> 16;
+    return Max((float)value / 32767.0, -1.0);
+}
+
+float SignNotZero(float value)
+{
+    return value >= 0 ? 1.0 : -1.0;
+}
+
+/// A unit vector from the octahedron folded onto a square, as the mesh converter encodes normals and tangents.
+float3 DecodeOctahedral(float x, float y)
+{
+    float3 n = float3(x, y, 1 - Abs(x) - Abs(y));
+    if (n.z < 0)
+    {
+        float folded = (1 - Abs(n.y)) * SignNotZero(n.x);
+        n.y = (1 - Abs(n.x)) * SignNotZero(n.y);
+        n.x = folded;
+    }
+    return Normalize(n);
+}
+
+/// The attributes of *cluster*'s *vertex*, after the cluster's packed positions: the normal, the tangent with
+/// tangents, the UVs and the color, as *mesh*'s layout says (SceneMesh::AttributeLayout, Mesh::AttributeStride).
+SceneVertexAttributes LoadAttributes(Ptr<byte> geometry, SceneCluster cluster, SceneMesh mesh, uint vertex)
+{
+    uint bitsPerVertex = (cluster.PositionBits & 255) + ((cluster.PositionBits >> 8) & 255) +
+                         ((cluster.PositionBits >> 16) & 255);
+    uint positions = (cluster.VertexCount * bitsPerVertex + 31) / 32 * 4 + 4;
+    uint at = cluster.VertexOffset + positions + vertex * mesh.AttributeStride;
+    SceneVertexAttributes attributes;
+    uint normal = geometry.Read<uint>(at);
+    attributes.Normal = DecodeOctahedral(Snorm16(normal, 0), Snorm16(normal, 16));
+    at += 4;
+    attributes.Tangent = float4(0, 0, 0, 0);
+    if ((mesh.AttributeLayout & 16) != 0)
+    {
+        uint tangent = geometry.Read<uint>(at);
+        // The low bit of y is the bitangent sign: set for negative.
+        attributes.Tangent = float4(DecodeOctahedral(Snorm16(tangent, 0), Snorm16(tangent, 16)),
+                                    (tangent & 65536) != 0 ? -1.0 : 1.0);
+        at += 4;
+    }
+    uint uvs = mesh.AttributeLayout & 15;
+    attributes.Uv0 = uvs > 0 ? float2(geometry.Read<float>(at), geometry.Read<float>(at + 4)) : float2(0, 0);
+    attributes.Uv1 = uvs > 1 ? float2(geometry.Read<float>(at + 8), geometry.Read<float>(at + 12)) : float2(0, 0);
+    at += uvs * 8;
+    attributes.Color = float4(1, 1, 1, 1);
+    if ((mesh.AttributeLayout & 32) != 0)
+    {
+        uint color = geometry.Read<uint>(at);
+        attributes.Color = float4((float)(color & 255), (float)((color >> 8) & 255), (float)((color >> 16) & 255),
+                                  (float)(color >> 24)) / 255.0;
+    }
+    return attributes;
+}
+
+/// The mesh-space position of *cluster*'s *vertex*: its offsets on the mesh's grid from the cluster's corner.
+float3 LoadPosition(Ptr<byte> geometry, SceneCluster cluster, uint vertex)
+{
+    uint bitsX = cluster.PositionBits & 255;
+    uint bitsY = (cluster.PositionBits >> 8) & 255;
+    uint bitsZ = (cluster.PositionBits >> 16) & 255;
+    uint bit = vertex * (bitsX + bitsY + bitsZ);
+    int x = cluster.PositionMinX + (int)ReadBits(geometry, cluster.VertexOffset, bit, bitsX);
+    int y = cluster.PositionMinY + (int)ReadBits(geometry, cluster.VertexOffset, bit + bitsX, bitsY);
+    int z = cluster.PositionMinZ + (int)ReadBits(geometry, cluster.VertexOffset, bit + bitsX + bitsY, bitsZ);
+    return float3((float)x, (float)y, (float)z) * cluster.PositionStep;
+}
+
+/// The three cluster-local vertex indices of *triangle*, one byte each.
+uint3 LoadTriangle(Ptr<byte> geometry, SceneCluster cluster, uint triangle)
+{
+    uint offset = cluster.IndexOffset + triangle * 3;
+    uint aligned = offset & 4294967292;
+    ulong words = (ulong)geometry.Read<uint>(aligned) | ((ulong)geometry.Read<uint>(aligned + 4) << 32);
+    uint shift = (offset & 3) * 8;
+    uint packed = (uint)(words >> shift);
+    return uint3(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255);
+}

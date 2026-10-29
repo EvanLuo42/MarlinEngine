@@ -1,0 +1,28 @@
+/// A material pass for tests (Documentation/Architecture/11): evaluates each material of a table at a fixed point,
+/// differentiated along x and y as Material Resolve does, and writes its first closure's albedo and closure count.
+namespace Marlin.Tests;
+
+using Marlin.Shading;
+
+[Compute(64, 1, 1)]
+void EvaluateMaterial<TMaterial>([DispatchThreadId] uint3 id, [Uniform] in Span<TMaterial> materials,
+                                 [Uniform] in Span<float4, Access.ReadWrite> output)
+    where TMaterial : ISurfaceMaterial
+{
+    if (id.x >= materials.Length)
+    {
+        return;
+    }
+    SurfaceInputs inputs = default;
+    inputs.WorldNormal = float3(0, 0, 1);
+    inputs.View = float3(0, 0, 1);
+    inputs.Uv0 = float2(0.5, 0.5);
+    SurfaceInputs dx = default;
+    dx.Uv0 = float2(1, 0);
+    SurfaceInputs dy = default;
+    dy.Uv0 = float2(0, 1);
+    TMaterial material = materials[id.x];
+    DifferentialPair2<Surface> surface =
+        Autodiff.Forward(material.Evaluate, new DifferentialPair2<SurfaceInputs>(inputs, dx, dy));
+    output[id.x] = float4((float3)surface.Primal.Closures[0].Slab.Albedo, (float)surface.Primal.Count);
+}

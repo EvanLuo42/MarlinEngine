@@ -1,0 +1,345 @@
+/// The core library of the script dialect (MarlinScript §1.3, §10.1): always visible, together with the common core
+/// library. Only files in /Engine/Language/Scripts/Core/ may declare `[Native]` functions and `[Builtin]` types.
+namespace Marlin;
+
+/// The base of every class (MarlinScript §3.2). Equals compares references and GetHashCode hashes the identity unless
+/// a class overrides them; a boxed value compares and hashes by value.
+[Builtin("Object")]
+public class object
+{
+    [Native("Object.Equals")] public virtual bool Equals(object? other);
+    [Native("Object.GetHashCode")] public virtual int GetHashCode();
+    [Native("Object.ToString")] public virtual string ToString();
+    [Native("Object.GetType")] public TypeInfo GetType();
+}
+
+/// Immutable UTF-8 text; lengths and offsets count bytes (MarlinScript §10.1).
+[Builtin("String")]
+public sealed class string : IEquatable<string>
+{
+    [Native("String.Length")] public int Length { get; }
+    [Native("String.Equals")] public bool Equals(string other);
+    [Native("String.Concat")] public static string Concat(string a, string b);
+    [Native("String.Substring")] public string Substring(int start, int length);
+    [Native("String.Contains")] public bool Contains(string value);
+    [Native("String.StartsWith")] public bool StartsWith(string value);
+    [Native("String.EndsWith")] public bool EndsWith(string value);
+    /// Orders by UTF-8 bytes, which is also Unicode scalar value order: negative, zero or positive.
+    [Native("String.CompareTo")] public int CompareTo(string other);
+    [Native("String.GetHashCode")] public override int GetHashCode();
+    /// The byte offset of the first *value* at or after *start*, or -1.
+    [Native("String.IndexOf")] public int IndexOf(string value, int start = 0);
+    /// The byte offset of the last *value*, or -1.
+    [Native("String.LastIndexOf")] public int LastIndexOf(string value);
+    /// The UTF-8 byte at *index*.
+    [Native("String.GetByte")] public int GetByte(int index);
+    /// Every *old* replaced by *replacement*, left to right without overlapping; *old* must not be empty.
+    [Native("String.Replace")] public string Replace(string old, string replacement);
+    /// Without the ASCII whitespace (space, tab, line breaks) at both ends.
+    [Native("String.Trim")] public string Trim();
+    [Native("String.TrimStart")] public string TrimStart();
+    [Native("String.TrimEnd")] public string TrimEnd();
+    /// With a-z changed to A-Z; other characters are kept, so the result does not depend on a locale.
+    [Native("String.ToUpperAscii")] public string ToUpperAscii();
+    [Native("String.ToLowerAscii")] public string ToLowerAscii();
+
+    public bool IsEmpty => Length == 0;
+
+    /// The pieces between occurrences of *separator*, which must not be empty: `"a,,b".Split(",")` is
+    /// `["a", "", "b"]`.
+    public string[] Split(string separator)
+    {
+        if (separator.Length == 0)
+        {
+            Panic("the separator is empty");
+        }
+        int count = 1;
+        int at = IndexOf(separator);
+        while (at >= 0)
+        {
+            count += 1;
+            at = IndexOf(separator, at + separator.Length);
+        }
+        var parts = new string[count];
+        int start = 0;
+        for (int i = 0; i < count - 1; i++)
+        {
+            int end = IndexOf(separator, start);
+            parts[i] = Substring(start, end - start);
+            start = end + separator.Length;
+        }
+        parts[count - 1] = Substring(start, Length - start);
+        return parts;
+    }
+
+    public static string Join(string separator, string[] parts)
+    {
+        var builder = new StringBuilder();
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(separator);
+            }
+            builder.Append(parts[i]);
+        }
+        return builder.ToString();
+    }
+
+    /// The Unicode scalar values of the text, decoded from UTF-8.
+    public StringRunes Runes() => new StringRunes(this);
+}
+
+/// The runes of a string, for `foreach`.
+public struct StringRunes
+{
+    private string _text;
+
+    public StringRunes(string text)
+    {
+        _text = text;
+    }
+
+    public RuneEnumerator GetEnumerator() => new RuneEnumerator(_text);
+}
+
+/// Decodes a string's UTF-8 one rune at a time, without allocating.
+public struct RuneEnumerator
+{
+    private string _text;
+    private int _next;
+    private Rune _current;
+
+    public RuneEnumerator(string text)
+    {
+        _text = text;
+        _next = 0;
+        _current = new Rune(0);
+    }
+
+    public bool MoveNext()
+    {
+        if (_next >= _text.Length)
+        {
+            return false;
+        }
+        int lead = _text.GetByte(_next);
+        int length = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+        uint value = lead < 0x80    ? (uint)lead
+                     : length == 2 ? (uint)(lead & 0x1F)
+                     : length == 3 ? (uint)(lead & 0x0F)
+                                   : (uint)(lead & 0x07);
+        for (int i = 1; i < length; i++)
+        {
+            value = (value << 6) | (uint)(_text.GetByte(_next + i) & 0x3F);
+        }
+        _current = new Rune(value);
+        _next += length;
+        return true;
+    }
+
+    public Rune Current => _current;
+}
+
+/// Parses numbers written as `ToString` writes them, independent of locale: the whole text must be the number.
+public static class Number
+{
+    [Native("Number.TryParseInt32")] public static bool TryParse(string text, out int value);
+    [Native("Number.TryParseUInt32")] public static bool TryParse(string text, out uint value);
+    [Native("Number.TryParseInt64")] public static bool TryParse(string text, out long value);
+    [Native("Number.TryParseUInt64")] public static bool TryParse(string text, out ulong value);
+    /// Also accepts "inf", "infinity" and "nan" in any case; the result is correctly rounded.
+    [Native("Number.TryParseFloat")] public static bool TryParse(string text, out float value);
+    [Native("Number.TryParseDouble")] public static bool TryParse(string text, out double value);
+
+    /// "True" or "False", in any case.
+    public static bool TryParse(string text, out bool value)
+    {
+        string lower = text.ToLowerAscii();
+        value = lower.Equals("true");
+        return value || lower.Equals("false");
+    }
+}
+
+/// Builds a string piece by piece; interpolated strings use it (MarlinScript §10.2).
+public sealed class StringBuilder
+{
+    [Native("StringBuilder.New")] public StringBuilder();
+    [Native("StringBuilder.AppendString")] public void Append(string value);
+    [Native("StringBuilder.AppendInt32")] public void Append(int value);
+    [Native("StringBuilder.AppendUInt32")] public void Append(uint value);
+    [Native("StringBuilder.AppendInt64")] public void Append(long value);
+    [Native("StringBuilder.AppendUInt64")] public void Append(ulong value);
+    [Native("StringBuilder.AppendFloat")] public void Append(float value);
+    [Native("StringBuilder.AppendDouble")] public void Append(double value);
+    [Native("StringBuilder.AppendBool")] public void Append(bool value);
+    public void Append(Rune value) => AppendRune(value.Value);
+    [Native("StringBuilder.AppendRune")] private void AppendRune(uint value);
+    [Native("StringBuilder.AppendInt32Format")] public void Append(int value, string format);
+    [Native("StringBuilder.AppendUInt32Format")] public void Append(uint value, string format);
+    [Native("StringBuilder.AppendInt64Format")] public void Append(long value, string format);
+    [Native("StringBuilder.AppendUInt64Format")] public void Append(ulong value, string format);
+    [Native("StringBuilder.AppendFloatFormat")] public void Append(float value, string format);
+    [Native("StringBuilder.AppendDoubleFormat")] public void Append(double value, string format);
+    [Native("StringBuilder.ToString")] public override string ToString();
+}
+
+/// The members of every array `T[]`.
+[Builtin("Array")]
+public sealed class Array<T>
+{
+    [Native("Array.Length")] public int Length { get; }
+    /// Copies *count* elements from *sourceIndex* to *destination* at *destinationIndex*, as if through a temporary
+    /// buffer, so the ranges may overlap. Ranges outside either array fault.
+    [Native("Array.CopyTo")] public void CopyTo(int sourceIndex, T[] destination, int destinationIndex, int count);
+    /// Sets *count* elements from *start* to their zero value.
+    [Native("Array.Clear")] public void Clear(int start, int count);
+}
+
+/// A Unicode scalar value, the type of `'a'`.
+public struct Rune
+{
+    public uint Value;
+    public Rune(uint value) { Value = value; }
+    public bool Equals(Rune other) => Value == other.Value;
+    public int GetHashCode() => (int)Value;
+}
+
+/// The engine's description of a type (04), as scripts may read it (MarlinScript §3.10).
+public sealed class TypeInfo
+{
+    [Native("TypeInfo.Name")] public string Name { get; }
+    [Native("TypeInfo.IsAssignableFrom")] public bool IsAssignableFrom(TypeInfo other);
+}
+
+public interface IEquatable<T>
+{
+    bool Equals(T other);
+}
+
+/// What `foreach` walks through by dispatch; types with a `GetEnumerator()` method of their own are walked without it.
+public interface IEnumerator<T>
+{
+    bool MoveNext();
+    T Current { get; }
+}
+
+public interface IEnumerable<T>
+{
+    IEnumerator<T> GetEnumerator();
+}
+
+/// A script task: an `async` function running on its own VM stack (MarlinScript §4.2).
+public class Task
+{
+    [Native("Task.IsCompleted")] public bool IsCompleted { get; }
+    [Native("Task.IsCanceled")] public bool IsCanceled { get; }
+    [Native("Task.IsFaulted")] public bool IsFaulted { get; }
+    [Native("Task.Cancel")] public void Cancel();
+    [Native("Task.WhenAll")] public static Task WhenAll(Task[] tasks);
+    [Native("Task.WhenAny")] public static Task WhenAny(Task[] tasks);
+    /// Starts *function* as a task owned by *owner* (an entity or a behaviour): it is canceled when its owner is
+    /// destroyed.
+    [Native("Task.Run")] public static Task Run(Func<Task> function, object? owner = null);
+}
+
+/// A task with a result.
+public sealed class Task<T> : Task
+{
+    [Native("Task.Result")] public T Result { get; }
+}
+
+/// The points in the frame a task can wait for (MarlinScript §4.2).
+public static class Frame
+{
+    /// Resumes at the start of the next frame's Gameplay phase.
+    [Native("Frame.Next")] public static Task Next();
+    /// Resumes at the same place in the next fixed tick.
+    [Native("Frame.NextFixed")] public static Task NextFixed();
+    /// Resumes after *seconds* of World time, which pauses and scales.
+    [Native("Frame.Delay")] public static Task Delay(float seconds);
+    /// Resumes at the first frame boundary where *condition* holds.
+    [Native("Frame.Until")] public static Task Until(Func<bool> condition);
+}
+
+/// A reference that does not keep its target alive (MarlinScript §9.2): once nothing else references the target,
+/// a collection frees it and Target becomes null.
+public sealed class WeakRef<T> where T : class
+{
+    [Native("WeakRef.New")] public WeakRef(T? target);
+    /// The target, or null once it has been collected.
+    [Native("WeakRef.GetTarget")] public T? Target { get; }
+    [Native("WeakRef.SetTarget")] public void SetTarget(T? target);
+
+    public bool IsAlive => Target != null;
+}
+
+/// Ends the current VM entry with a `Panic` fault (MarlinScript §15).
+[Native("Script.Panic")] public void Panic(string message);
+/// Ends the current VM entry with an `AssertFailed` fault (MarlinScript §15).
+[Native("Script.AssertFailed")] public void AssertFailed(string message);
+
+[Native("Int32.ToString")] public string ToString(this int value);
+[Native("UInt32.ToString")] public string ToString(this uint value);
+[Native("Int64.ToString")] public string ToString(this long value);
+[Native("UInt64.ToString")] public string ToString(this ulong value);
+[Native("Float.ToString")] public string ToString(this float value);
+[Native("Double.ToString")] public string ToString(this double value);
+[Native("Bool.ToString")] public string ToString(this bool value);
+
+// What generic code calls to compare and hash values (MarlinScript §10.1): classes use the virtual members of
+// object, structs declare `Equals(T)` and `GetHashCode()`, and the scalars use these. Equal values hash alike; float
+// and double treat NaN as equal to itself and +0 as equal to -0.
+public bool Equals(this int value, int other) => value == other;
+public bool Equals(this uint value, uint other) => value == other;
+public bool Equals(this long value, long other) => value == other;
+public bool Equals(this ulong value, ulong other) => value == other;
+public bool Equals(this bool value, bool other) => value == other;
+public bool Equals(this float value, float other) => value == other || (value != value && other != other);
+public bool Equals(this double value, double other) => value == other || (value != value && other != other);
+public int GetHashCode(this int value) => value;
+public int GetHashCode(this uint value) => (int)value;
+public int GetHashCode(this long value) => (int)value ^ (int)(value >> 32);
+public int GetHashCode(this ulong value) => (int)value ^ (int)(value >> 32);
+public int GetHashCode(this bool value) => value ? 1 : 0;
+public int GetHashCode(this float value) => value == 0.0f ? 0 : value != value ? -1 : AsInt(value);
+public int GetHashCode(this double value) => value == 0.0 ? 0 : value != value ? -1 : GetHashCode(AsLong(value));
+public int CompareTo(this int value, int other) => value < other ? -1 : value > other ? 1 : 0;
+public int CompareTo(this uint value, uint other) => value < other ? -1 : value > other ? 1 : 0;
+public int CompareTo(this long value, long other) => value < other ? -1 : value > other ? 1 : 0;
+public int CompareTo(this ulong value, ulong other) => value < other ? -1 : value > other ? 1 : 0;
+public int CompareTo(this bool value, bool other) => value == other ? 0 : value ? 1 : -1;
+/// NaN sorts before every other value and equal to itself.
+public int CompareTo(this float value, float other) =>
+    value < other ? -1 : value > other ? 1 : value == other ? 0 : value != value ? (other != other ? 0 : -1) : 1;
+public int CompareTo(this double value, double other) =>
+    value < other ? -1 : value > other ? 1 : value == other ? 0 : value != value ? (other != other ? 0 : -1) : 1;
+
+public delegate void Action();
+public delegate void Action<T1>(T1 arg1);
+public delegate void Action<T1, T2>(T1 arg1, T2 arg2);
+public delegate void Action<T1, T2, T3>(T1 arg1, T2 arg2, T3 arg3);
+public delegate void Action<T1, T2, T3, T4>(T1 arg1, T2 arg2, T3 arg3, T4 arg4);
+public delegate TResult Func<TResult>();
+public delegate TResult Func<T1, TResult>(T1 arg1);
+public delegate TResult Func<T1, T2, TResult>(T1 arg1, T2 arg2);
+public delegate TResult Func<T1, T2, T3, TResult>(T1 arg1, T2 arg2, T3 arg3);
+public delegate TResult Func<T1, T2, T3, T4, TResult>(T1 arg1, T2 arg2, T3 arg3, T4 arg4);
+
+/// Debug output (MarlinScript §10.1). Calls exist only when the compile options enable debug output (editor and
+/// Development builds); otherwise they are removed together with their arguments, which are then not evaluated.
+public static class Debug
+{
+    /// Writes *message* to the log (LogScript).
+    [DebugOnly, Native("Debug.Print")] public static void Print(string message);
+
+    /// Ends the current VM entry with an `AssertFailed` fault when *condition* is false.
+    [DebugOnly]
+    public static void Assert(bool condition, string message)
+    {
+        if (!condition)
+        {
+            AssertFailed(message);
+        }
+    }
+}

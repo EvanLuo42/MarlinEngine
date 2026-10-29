@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "8ecd9dcc-3074-55a2-8964-5f8c04f8714f"
+    !Name = "star"
+    SourceFile = `source:star.svg#74e9b5eb-eedb-44b9-80b7-b45a78bb5e3a`
+}

@@ -1,0 +1,234 @@
+/// The first lighting (Documentation/Architecture/07 §3): one directional sun and constant ambient, no shadows, over
+/// the closures Material Resolve wrote (Passes/Material/Closures.mshader). One pass per tile class: Simple tiles
+/// evaluate a plain Slab, Single tiles one closure of any Slab kind, Complex tiles every Slab closure; each custom BSDF
+/// in use adds its closures to the Complex tiles with LightCustom, compiled for it (07 §4.3). Writes HDR radiance.
+namespace Marlin.Passes.Lighting;
+
+using Marlin.Passes.Material;
+using Marlin.Passes.Scene;
+using Marlin.Shading;
+
+/// The lights of a view: the unit direction towards the sun and its illuminance, and the ambient illuminance from
+/// the whole sky; w unused.
+public struct SceneLights
+{
+    public float4 SunDirection;
+    public float4 SunIlluminance;
+    public float4 Ambient;
+}
+
+public struct LightArguments
+{
+    public Span<SceneViewData> View;
+    public Span<SceneLights> Lights;
+    public Span<uint> Headers;
+    public Span<uint> Plane;
+    public Span<uint> Records;
+    /// The tile lists of the tile classes (BuildTileLists) and their counts.
+    public Span<uint> TileLists;
+    public Span<uint> TileCounts;
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f> Color;
+    public uint TileCapacity;
+    public uint TilesX;
+    public uint GroupsX;
+}
+
+/// A pixel of a listed tile of class *kind*, or false outside the view or past the list.
+bool PixelOf(LightArguments args, uint3 group, uint3 thread, uint kind, out uint2 pixel)
+{
+    pixel = uint2(0, 0);
+    uint listed = group.y * args.GroupsX + group.x;
+    if (listed >= Min(args.TileCounts[kind], args.TileCapacity))
+    {
+        return false;
+    }
+    uint tile = args.TileLists[kind * args.TileCapacity + listed];
+    SceneViewData view = args.View[0];
+    pixel = uint2((tile % args.TilesX) * 8 + thread.x, (tile / args.TilesX) * 8 + thread.y);
+    return pixel.x < view.Width && pixel.y < view.Height;
+}
+
+/// The direction from the pixel's surface to the camera, from the view basis.
+float3 ViewDirectionOf(SceneViewData view, uint2 pixel)
+{
+    float2 ndc = float2(((float)pixel.x + 0.5) / (float)view.Width * 2 - 1,
+                        1 - ((float)pixel.y + 0.5) / (float)view.Height * 2);
+    float3 ray = view.Forward.xyz + view.Right.xyz * (ndc.x / view.Right.w) + view.Up.xyz * (ndc.y / view.Up.w);
+    return -Normalize(ray);
+}
+
+/// What reaches a closure under layers (Surface.VerticalLayer) that let *coat* through straight down and reflect
+/// *reflectance* at their surface, coming in at cosine *nl* and going out at cosine *nv*: each crossing loses the
+/// surface's Fresnel reflection and coat^(1/cos) of the matter.
+float3 CoatAttenuation(float4 coat, float nl, float nv)
+{
+    float3 color = Max(coat.xyz, float3(1e-4, 1e-4, 1e-4));
+    float paths = 1 / Max(nl, 0.05) + 1 / Max(nv, 0.05);
+    float3 f0 = float3(coat.w, coat.w, coat.w);
+    float3 enter = float3(1, 1, 1) - FresnelSchlick(f0, nl);
+    float3 leave = float3(1, 1, 1) - FresnelSchlick(f0, nv);
+    return Exp2(Log2(color) * paths) * enter * leave;
+}
+
+/// No layer over a closure.
+const uint Uncoated = 0x00ffffff;
+
+/// The radiance a Slab closure sends to the viewer: the sun, the ambient and its emission, times its weight, through
+/// the layers over it (*coat*, Unorm8x4: transmittance and reflectance).
+float3 ShadeSlab(Slab slab, float3 normal, float weight, float3 v, SceneLights lights, bool simple, uint coat)
+{
+    if (simple)
+    {
+        slab.Fuzz = 0.0h;
+    }
+    BsdfContext ctx;
+    ctx.N = normal;
+    ctx.V = v;
+    LightSample sun;
+    sun.L = lights.SunDirection.xyz;
+    sun.Illuminance = lights.SunIlluminance.xyz;
+    float3 direct = SlabBsdf.EvaluateDirect(slab, ctx, sun) * sun.Illuminance;
+    float3 ambient = SlabBsdf.EvaluateIndirect(slab, ctx, lights.Ambient.xyz * (1 / Pi));
+    float3 emission = (float3)slab.Emission;
+    if (coat != Uncoated)
+    {
+        float4 layers = UnpackUnorm8x4(coat);
+        float nv = Saturate(Dot(normal, v));
+        // The ambient comes from every direction: taken as coming in along the normal.
+        direct *= CoatAttenuation(layers, Saturate(Dot(normal, sun.L)), nv);
+        ambient *= CoatAttenuation(layers, 1, nv);
+        emission *= Exp2(Log2(Max(layers.xyz, float3(1e-4, 1e-4, 1e-4))) / Max(nv, 0.05)) *
+                    (float3(1, 1, 1) - FresnelSchlick(float3(layers.w, layers.w, layers.w), nv));
+    }
+    return (direct + ambient + emission) * weight;
+}
+
+/// The radiance of a pixel's Slab closures; *all* takes every one, otherwise only the first.
+float3 ShadePixel(LightArguments args, uint pixel, float3 v, SceneLights lights, bool simple, bool all)
+{
+    uint header = args.Headers[pixel];
+    uint count = header & 7;
+    if (count == 0)
+    {
+        // Nothing drawn: the sky.
+        return lights.Ambient.xyz * (1 / Pi);
+    }
+    bool plane = (header & HeaderPlane) != 0;
+    uint first = header >> 8;
+    float3 radiance = float3(0, 0, 0);
+    // The plane's Slab, then the records'.
+    [Unroll]
+    for (uint i = 0; i < MaxClosures; ++i)
+    {
+        if (i < count && (all || i == 0))
+        {
+            bool inPlane = i == 0 && plane;
+            uint record = (first + i - (plane ? 1u : 0u)) * RecordWords;
+            uint at = inPlane ? pixel * SlabWords : record + 2;
+            bool slab = inPlane || args.Records[record] == SlabClosure;
+            if (slab)
+            {
+                float3 normal;
+                float weight;
+                Slab closure = inPlane ? UnpackSlab(args.Plane[at], args.Plane[at + 1], args.Plane[at + 2],
+                                                    args.Plane[at + 3], args.Plane[at + 4], args.Plane[at + 5],
+                                                    out normal, out weight)
+                                       : UnpackSlab(args.Records[at], args.Records[at + 1], args.Records[at + 2],
+                                                    args.Records[at + 3], args.Records[at + 4], args.Records[at + 5],
+                                                    out normal, out weight);
+                radiance += ShadeSlab(closure, normal, inPlane ? weight : AsFloat(args.Records[record + 1]), v,
+                                      lights, simple, inPlane ? Uncoated : args.Records[record + 11]);
+            }
+        }
+    }
+    return radiance;
+}
+
+void Light(LightArguments args, uint3 group, uint3 thread, uint kind)
+{
+    uint2 pixel;
+    if (!PixelOf(args, group, thread, kind, out pixel))
+    {
+        return;
+    }
+    SceneViewData view = args.View[0];
+    float3 radiance = ShadePixel(args, pixel.y * view.Width + pixel.x, ViewDirectionOf(view, pixel), args.Lights[0],
+                                 kind == 0, kind == 2);
+    args.Color.Store(int2((int)pixel.x, (int)pixel.y), float4(radiance, 1));
+}
+
+[Compute(8, 8, 1)]
+void LightSimple([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in LightArguments args)
+{
+    Light(args, group, thread, 0);
+}
+
+[Compute(8, 8, 1)]
+void LightSingle([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in LightArguments args)
+{
+    Light(args, group, thread, 1);
+}
+
+[Compute(8, 8, 1)]
+void LightComplex([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in LightArguments args)
+{
+    Light(args, group, thread, 2);
+}
+
+/// Adds the closures of custom BSDF *TBsdf* to the Complex tiles' radiance: its EvaluateDirect for the sun, and its
+/// EvaluateIndirect, if it has one, for the ambient (07 §4.3).
+[Compute(8, 8, 1)]
+void LightCustom<TBsdf>([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in LightArguments args)
+    where TBsdf : IBsdf
+{
+    uint2 pixel;
+    if (!PixelOf(args, group, thread, 2, out pixel))
+    {
+        return;
+    }
+    SceneViewData view = args.View[0];
+    uint index = pixel.y * view.Width + pixel.x;
+    uint header = args.Headers[index];
+    uint count = header & 7;
+    bool plane = (header & HeaderPlane) != 0;
+    uint first = header >> 8;
+    SceneLights lights = args.Lights[0];
+    float3 radiance = float3(0, 0, 0);
+    uint type = Compiler.TypeId<TBsdf>();
+    [Unroll]
+    for (uint i = 0; i < MaxClosures; ++i)
+    {
+        uint record = (first + i - (plane ? 1u : 0u)) * RecordWords;
+        if (i < count && !(i == 0 && plane) && args.Records[record] == type)
+        {
+            uint[8] payload = default;
+            [Unroll]
+            for (uint w = 0; w < 8; ++w)
+            {
+                payload[w] = args.Records[record + 2 + w];
+            }
+            TBsdf bsdf = Compiler.FromWords<TBsdf>(payload);
+            BsdfContext ctx;
+            ctx.N = UnpackOctahedral(args.Records[record + 10]);
+            ctx.V = ViewDirectionOf(view, pixel);
+            LightSample sun;
+            sun.L = lights.SunDirection.xyz;
+            sun.Illuminance = lights.SunIlluminance.xyz;
+            uint coat = args.Records[record + 11];
+            float nv = Saturate(Dot(ctx.N, ctx.V));
+            float3 direct = (float3)bsdf.EvaluateDirect(ctx, sun) * sun.Illuminance;
+            float3 closure = coat != Uncoated
+                                 ? direct * CoatAttenuation(UnpackUnorm8x4(coat), Saturate(Dot(ctx.N, sun.L)), nv)
+                                 : direct;
+            static if (TBsdf.Implements(nameof(IBsdf.EvaluateIndirect)))
+            {
+                float3 ambient = (float3)bsdf.EvaluateIndirect(ctx, lights.Ambient.xyz * (1 / Pi));
+                closure += coat != Uncoated ? ambient * CoatAttenuation(UnpackUnorm8x4(coat), 1, nv) : ambient;
+            }
+            radiance += closure * AsFloat(args.Records[record + 1]);
+        }
+    }
+    int2 at = int2((int)pixel.x, (int)pixel.y);
+    float4 color = args.Color.Load(at);
+    args.Color.Store(at, float4(color.xyz + radiance, 1));
+}

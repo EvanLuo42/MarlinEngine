@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "509b3e66-18f1-5523-af23-a5df86908e4a"
+    !Name = "music"
+    SourceFile = `source:music.svg#513cb2c4-af0c-4bd5-ad5a-547625ea1ea9`
+}

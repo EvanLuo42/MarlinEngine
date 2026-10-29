@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "6bab3d3b-ce4a-5ef2-851c-ab5c1054a63a"
+    !Name = "mountain"
+    SourceFile = `source:mountain.svg#ce7596ec-fae7-42ce-bbc4-6a61c7501713`
+}

@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "5b3040d0-a0e9-5db6-971b-0bcd7600958f"
+    !Name = "shield-check"
+    SourceFile = `source:shield-check.svg#c63b80c8-6a24-49a7-bc48-27627690b6a1`
+}

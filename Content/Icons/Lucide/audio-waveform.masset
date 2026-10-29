@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "5965396e-4368-5b89-adb7-dbe91d50d627"
+    !Name = "audio-waveform"
+    SourceFile = `source:audio-waveform.svg#7895c2d3-c175-4a87-ac2b-df343079a760`
+}

@@ -1,0 +1,36 @@
+!Version "1.0"
+
+// Editor defaults. Plugins, the project and the user override them in their own Editor.mtext.
+
+Menus
+{
+    // The main window's menu bar, left to right; subsystems add the items (EditorMenuSubsystem::AddItem), and a menu
+    // with no items does not open.
+    MenuBar = ["File", "Edit", "View", "Game", "Tools", "Sound", "Window", "Help"]
+}
+
+UI
+{
+    // The editor UI's size on top of the display's DPI scale (Editor.UIScale changes it live). The theme's metrics are
+    // a dense 11–12 px design; 1.25 keeps it readable on a 100 % DPI display.
+    Scale = 1.25
+}
+
+AssetTypes
+{
+    // How the Asset Manager shows each source type: its label, and its theme icon and color tokens. Types not listed
+    // show their name without "Source", a file icon and AssetType.Other.
+    Styles =
+    [
+        { Type = "TextureSource" Label = "Texture" Icon = "Image" Color = "AssetType.Texture" },
+        { Type = "MeshSource" Label = "Mesh" Icon = "Box" Color = "AssetType.Mesh" },
+        { Type = "Prefab" Label = "Prefab" Icon = "Package" Color = "AssetType.Prefab" },
+        { Type = "Level" Label = "Level" Icon = "Mountain" Color = "AssetType.Level" },
+        { Type = "FontSource" Label = "Font" Icon = "Type" Color = "AssetType.Font" },
+        { Type = "IconSource" Label = "Icon" Icon = "Shapes" Color = "AssetType.Icon" },
+        { Type = "MaterialSource" Label = "Material" Icon = "CircleDot" Color = "AssetType.Material" },
+        { Type = "AudioSource" Label = "Audio" Icon = "AudioWaveform" Color = "AssetType.Audio" },
+        { Type = "AnimationSource" Label = "Animation" Icon = "PersonStanding" Color = "AssetType.Animation" },
+        { Type = "VfxSource" Label = "VFX" Icon = "Sparkles" Color = "AssetType.Vfx" },
+    ]
+}

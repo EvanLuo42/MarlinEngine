@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "95ae355d-5ef3-513e-9441-2edd1198930d"
+    !Name = "sparkles"
+    SourceFile = `source:sparkles.svg#174e2788-c1bc-4f0f-b659-f0661c11fc49`
+}

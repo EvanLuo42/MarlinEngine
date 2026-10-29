@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "c5ed0f9e-d753-5d8f-a4a2-81c960d7778a"
+    !Name = "folder-plus"
+    SourceFile = `source:folder-plus.svg#fc4a48df-78ea-4663-b2f1-66eaf0d34cbb`
+}

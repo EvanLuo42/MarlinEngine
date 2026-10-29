@@ -1,0 +1,118 @@
+/// Binning of a canvas's commands into 16×16 tiles (Documentation/Architecture/09 §2). Every (command, tile) pair
+/// is one thread: Count counts each tile's commands, Scan turns the counts into offsets, Scatter writes each tile's
+/// command indices. Order within a tile is restored by the raster pass.
+namespace Marlin.Passes.Ui;
+
+public struct UiBinArguments
+{
+    public Span<UiTileRect> TileRects;
+    /// Exclusive prefix of each command's tile count; CommandCount + 1 entries.
+    public Span<uint> PairStarts;
+    public Span<uint, Access.ReadWrite> TileCounts;
+    public Span<uint, Access.ReadWrite> TileCursors;
+    public Span<uint, Access.ReadWrite> TileCommands;
+    public uint CommandCount;
+    public uint PairCount;
+    public uint TilesX;
+}
+
+public struct UiScanArguments
+{
+    public Span<uint> TileCounts;
+    public Span<uint, Access.ReadWrite> TileOffsets;
+    public Span<uint, Access.ReadWrite> TileCursors;
+    public uint TileCount;
+}
+
+/// The command whose pairs hold *pair*, and the tile it stands for.
+void FindPair(in UiBinArguments args, uint pair, out uint command, out uint tile)
+{
+    uint low = 0;
+    uint high = args.CommandCount;
+    while (low + 1 < high)
+    {
+        uint middle = (low + high) / 2;
+        if (args.PairStarts[middle] <= pair)
+        {
+            low = middle;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    command = low;
+    UiTileRect rect = args.TileRects[low];
+    uint local = pair - args.PairStarts[low];
+    uint width = rect.X1 - rect.X0;
+    tile = (rect.Y0 + local / width) * args.TilesX + rect.X0 + local % width;
+}
+
+[Compute(64, 1, 1)]
+void Count([DispatchThreadId] uint3 id, [Uniform] in UiBinArguments args)
+{
+    if (id.x >= args.PairCount)
+    {
+        return;
+    }
+    uint command = 0;
+    uint tile = 0;
+    FindPair(args, id.x, out command, out tile);
+    Atomic.Add(ref args.TileCounts[tile], 1u);
+}
+
+[GroupShared] static uint[1024] ScanSums;
+
+[Compute(1024, 1, 1)]
+void Scan([GroupIndex] uint lane, [Uniform] in UiScanArguments args)
+{
+    uint perLane = (args.TileCount + 1023) / 1024;
+    uint first = lane * perLane;
+    uint sum = 0;
+    for (uint i = 0; i < perLane; i++)
+    {
+        uint tile = first + i;
+        if (tile < args.TileCount)
+        {
+            sum += args.TileCounts[tile];
+        }
+    }
+    ScanSums[lane] = sum;
+    Barrier.Group();
+    for (uint stride = 1; stride < 1024; stride *= 2)
+    {
+        uint add = 0;
+        if (lane >= stride)
+        {
+            add = ScanSums[lane - stride];
+        }
+        Barrier.Group();
+        ScanSums[lane] += add;
+        Barrier.Group();
+    }
+    uint offset = ScanSums[lane] - sum;
+    for (uint j = 0; j < perLane; j++)
+    {
+        uint tile = first + j;
+        if (tile < args.TileCount)
+        {
+            args.TileOffsets[tile] = offset;
+            args.TileCursors[tile] = offset;
+            offset += args.TileCounts[tile];
+        }
+    }
+}
+
+[Compute(64, 1, 1)]
+void Scatter([DispatchThreadId] uint3 id, [Uniform] in UiBinArguments args)
+{
+    if (id.x >= args.PairCount)
+    {
+        return;
+    }
+    uint command = 0;
+    uint tile = 0;
+    FindPair(args, id.x, out command, out tile);
+    uint slot = Atomic.Add(ref args.TileCursors[tile], 1u);
+    args.TileCommands[slot] = command;
+}

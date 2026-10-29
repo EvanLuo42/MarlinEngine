@@ -1,0 +1,7 @@
+Family: JetBrains Mono
+Version: 2.304 (tag v2.304)
+Release: https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304
+Archive: https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+Archive SHA-256: 6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf
+Files: fonts/ttf/JetBrainsMono-Regular.ttf, fonts/ttf/JetBrainsMono-Bold.ttf, OFL.txt (as LICENSE.txt)
+License: OFL-1.1

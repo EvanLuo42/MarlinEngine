@@ -1,0 +1,255 @@
+/// Analytic coverage of UIPainter's primitives (Documentation/Architecture/09 §2): signed distances for shapes,
+/// horizontal and vertical ray crossings for filled outlines. Distances are in a primitive's local units; *pixel* is
+/// the size of a device pixel in those units, so edges are one device pixel wide whatever the transform.
+namespace Marlin.Passes.Ui;
+
+float CoverageFromDistance(float distance, float pixel) => Saturate(0.5 - distance / pixel);
+
+float RoundedRectDistance(float2 p, float4 rect, float4 radii)
+{
+    float2 center = (rect.xy + rect.zw) * 0.5;
+    float2 extent = (rect.zw - rect.xy) * 0.5;
+    float2 q = p - center;
+    float radius = 0;
+    if (q.x > 0)
+    {
+        radius = q.y > 0 ? radii.z : radii.y;
+    }
+    else
+    {
+        radius = q.y > 0 ? radii.w : radii.x;
+    }
+    float2 d = Abs(q) - extent + float2(radius, radius);
+    return Min(Max(d.x, d.y), 0.0) + Length(Max(d, float2(0, 0))) - radius;
+}
+
+float EllipseDistance(float2 p, float2 center, float2 radii)
+{
+    float2 q = p - center;
+    float k1 = Length(q / radii);
+    float k2 = Length(q / (radii * radii));
+    if (k2 < 1e-6)
+    {
+        return -Min(radii.x, radii.y);
+    }
+    return k1 * (k1 - 1.0) / k2;
+}
+
+float Erf(float x)
+{
+    float a = 0.147;
+    float x2 = x * x;
+    float value = Sqrt(1.0 - Exp(-x2 * (1.2732395 + a * x2) / (1.0 + a * x2)));
+    return x < 0 ? -value : value;
+}
+
+/// The fraction of a Gaussian-blurred shape at signed distance *distance* from its edge.
+float BlurredCoverage(float distance, float sigma, float pixel)
+{
+    if (sigma <= pixel * 0.25)
+    {
+        return CoverageFromDistance(distance, pixel);
+    }
+    return 0.5 - 0.5 * Erf(distance / (sigma * 1.4142135));
+}
+
+/// How much of a pixel lies before a piece's end plane, *distance* in front of it: a free end fades across the
+/// pixel, a joined end (one another piece continues) stays whole up to the plane and fades beyond it, so the union of
+/// the two pieces has no seam.
+float EndCoverage(float distance, float pixel, bool joined) =>
+    joined ? Saturate(1.0 + distance / pixel) : Saturate(0.5 + distance / pixel);
+
+/// A straight stroke piece with butt ends.
+float LineCoverage(float2 p, float2 a, float2 b, float halfWidth, float pixel, uint joined)
+{
+    float2 axis = b - a;
+    float length2 = Dot(axis, axis);
+    if (length2 < 1e-12)
+    {
+        return 0;
+    }
+    float len = Sqrt(length2);
+    float2 direction = axis / len;
+    float2 offset = p - a;
+    float along = Dot(offset, direction);
+    float across = Abs(offset.x * direction.y - offset.y * direction.x);
+    float ends = EndCoverage(along, pixel, (joined & 1u) != 0) * EndCoverage(len - along, pixel, (joined & 2u) != 0);
+    return ends * CoverageFromDistance(across - halfWidth, pixel);
+}
+
+float2 QuadPoint(float2 a, float2 b, float2 c, float t) => a * ((1.0 - t) * (1.0 - t)) + b * (2.0 * (1.0 - t) * t) + c * (t * t);
+
+/// The distance from *p* to the quadratic curve a b c (after Inigo Quilez's closed-form solution).
+float QuadDistance(float2 p, float2 a, float2 b, float2 c)
+{
+    float2 e = b - a;
+    float2 f = a - 2.0 * b + c;
+    float2 g = e * 2.0;
+    float2 d = a - p;
+    float ff = Dot(f, f);
+    if (ff < 1e-10)
+    {
+        float2 axis = c - a;
+        float t = Saturate(Dot(p - a, axis) / Max(Dot(axis, axis), 1e-12));
+        return Length(p - (a + axis * t));
+    }
+    float kk = 1.0 / ff;
+    float kx = kk * Dot(e, f);
+    float ky = kk * (2.0 * Dot(e, e) + Dot(d, f)) / 3.0;
+    float kz = kk * Dot(d, e);
+    float pp = ky - kx * kx;
+    float p3 = pp * pp * pp;
+    float q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+    float h = q * q + 4.0 * p3;
+    if (h >= 0.0)
+    {
+        h = Sqrt(h);
+        float2 x = (float2(h, -h) - float2(q, q)) * 0.5;
+        float2 uv = float2(Sign(x.x) * Pow(Abs(x.x), 1.0 / 3.0), Sign(x.y) * Pow(Abs(x.y), 1.0 / 3.0));
+        float t = Saturate(uv.x + uv.y - kx);
+        float2 r = d + (g + f * t) * t;
+        return Length(r);
+    }
+    float z = Sqrt(-pp);
+    float v = Acos(Clamp(q / (pp * z * 2.0), -1.0, 1.0)) / 3.0;
+    float m = Cos(v);
+    float n = Sin(v) * 1.7320508;
+    float t0 = Saturate((m + m) * z - kx);
+    float t1 = Saturate((-n - m) * z - kx);
+    float2 r0 = d + (g + f * t0) * t0;
+    float2 r1 = d + (g + f * t1) * t1;
+    return Sqrt(Min(Dot(r0, r0), Dot(r1, r1)));
+}
+
+/// A curved stroke piece with butt ends: the planes through its end points across their tangents cut it.
+float QuadStrokeCoverage(float2 p, float2 a, float2 b, float2 c, float halfWidth, float pixel, uint joined)
+{
+    float2 startTangent = b - a;
+    if (Dot(startTangent, startTangent) < 1e-12)
+    {
+        startTangent = c - a;
+    }
+    float2 endTangent = c - b;
+    if (Dot(endTangent, endTangent) < 1e-12)
+    {
+        endTangent = c - a;
+    }
+    startTangent = Normalize(startTangent);
+    endTangent = Normalize(endTangent);
+    float ends = EndCoverage(Dot(p - a, startTangent), pixel, (joined & 1u) != 0) *
+                 EndCoverage(Dot(c - p, endTangent), pixel, (joined & 2u) != 0);
+    return ends * CoverageFromDistance(QuadDistance(p, a, b, c) - halfWidth, pixel);
+}
+
+float PolygonCoverage(float2 p, float2 p0, float2 p1, float2 p2, float2 p3, float pixel)
+{
+    float area = (p0.x * p1.y - p1.x * p0.y) + (p1.x * p2.y - p2.x * p1.y) + (p2.x * p3.y - p3.x * p2.y) +
+                 (p3.x * p0.y - p0.x * p3.y);
+    if (Abs(area) < 1e-10)
+    {
+        return 0;
+    }
+    float orientation = area > 0 ? 1.0 : -1.0;
+    float2[4] points;
+    points[0] = p0;
+    points[1] = p1;
+    points[2] = p2;
+    points[3] = p3;
+    float distance = -1e30;
+    for (uint i = 0; i < 4; i++)
+    {
+        float2 from = points[i];
+        float2 edge = points[(i + 1) % 4] - from;
+        float len = Length(edge);
+        if (len > 1e-6)
+        {
+            float2 outward = float2(edge.y, -edge.x) * (orientation / len);
+            distance = Max(distance, Dot(p - from, outward));
+        }
+    }
+    return CoverageFromDistance(distance, pixel);
+}
+
+/// The parameter where the curve, monotonic along *axis*, reaches *value* on it.
+float SolveMonotonic(float a, float b, float c, float value)
+{
+    float qa = a - 2.0 * b + c;
+    float qb = 2.0 * (b - a);
+    float qc = a - value;
+    if (Abs(qa) < 1e-7 * (Abs(qb) + Abs(qc) + 1e-12))
+    {
+        return Saturate(-qc / qb);
+    }
+    float discriminant = Max(qb * qb - 4.0 * qa * qc, 0.0);
+    float root = Sqrt(discriminant);
+    float q = -0.5 * (qb + (qb >= 0 ? root : -root));
+    float t0 = q / qa;
+    float t1 = Abs(q) > 1e-20 ? qc / q : t0;
+    float d0 = Abs(t0 - Saturate(t0));
+    float d1 = Abs(t1 - Saturate(t1));
+    return Saturate(d0 <= d1 ? t0 : t1);
+}
+
+/// Winding along a ray from *point* towards +x (*vertical* false) or +y, each crossing weighted by how much of the
+/// pixel lies before it: an analytic box filter across the ray.
+float RayWinding(Span<uint> words, Span<UiCurve> curves, uint record, float2 point, float pixel,
+                 bool vertical)
+{
+    uint curveOffset = words[record];
+    uint bandsY = words[record + 2];
+    uint bandsX = words[record + 3];
+    float4 bounds = float4(AsFloat(words[record + 4]), AsFloat(words[record + 5]), AsFloat(words[record + 6]),
+                           AsFloat(words[record + 7]));
+    float along = vertical ? point.x : point.y;
+    float low = vertical ? bounds.x : bounds.y;
+    float high = vertical ? bounds.z : bounds.w;
+    uint bands = vertical ? bandsX : bandsY;
+    uint band = (uint)Clamp(Floor((along - low) / Max(high - low, 1e-6) * (float)bands), 0.0, (float)(bands - 1));
+    uint rangeSlot = record + 8 + ((vertical ? bandsY : 0u) + band) * 2;
+    uint first = words[rangeSlot];
+    uint count = words[rangeSlot + 1];
+    float winding = 0;
+    for (uint i = 0; i < count; i++)
+    {
+        UiCurve curve = curves[curveOffset + words[first + i]];
+        float a = vertical ? curve.P0.x : curve.P0.y;
+        float b = vertical ? curve.P1.x : curve.P1.y;
+        float c = vertical ? curve.P2.x : curve.P2.y;
+        if (a == c || along < Min(a, c) || along >= Max(a, c))
+        {
+            continue;
+        }
+        float t = SolveMonotonic(a, b, c, along);
+        float2 hit = QuadPoint(curve.P0, curve.P1, curve.P2, t);
+        float across = vertical ? hit.y - point.y : hit.x - point.x;
+        float direction = c > a ? 1.0 : -1.0;
+        winding += direction * Saturate(across / pixel + 0.5);
+    }
+    return winding;
+}
+
+float WindingCoverage(float winding, bool evenOdd)
+{
+    float magnitude = Abs(winding);
+    if (evenOdd)
+    {
+        return 1.0 - Abs(magnitude - 2.0 * Floor(magnitude * 0.5) - 1.0);
+    }
+    return Min(magnitude, 1.0);
+}
+
+/// The coverage of the outline at *record* around *point*, both in outline units.
+float OutlineCoverage(Span<uint> words, Span<UiCurve> curves, uint record, float2 point,
+                      float pixel, bool evenOdd)
+{
+    float4 bounds = float4(AsFloat(words[record + 4]), AsFloat(words[record + 5]), AsFloat(words[record + 6]),
+                           AsFloat(words[record + 7]));
+    if (point.x < bounds.x - pixel || point.y < bounds.y - pixel || point.x > bounds.z + pixel ||
+        point.y > bounds.w + pixel)
+    {
+        return 0;
+    }
+    float horizontal = WindingCoverage(RayWinding(words, curves, record, point, pixel, false), evenOdd);
+    float vertical = WindingCoverage(RayWinding(words, curves, record, point, pixel, true), evenOdd);
+    return 0.5 * (horizontal + vertical);
+}

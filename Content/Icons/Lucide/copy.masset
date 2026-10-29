@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "5c6d7df1-9c47-53c9-912a-31f1e175daaf"
+    !Name = "copy"
+    SourceFile = `source:copy.svg#c85d1e74-8a40-47e8-9dba-4a6ba610aa83`
+}

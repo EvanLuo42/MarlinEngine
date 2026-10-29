@@ -1,0 +1,36 @@
+/// Tests of Marlin.Tasks (MarlinScript §4.2, §10.1).
+namespace Marlin.Tests;
+
+using Marlin.Tasks;
+
+async Task<int> SlowValue(int frames, int value)
+{
+    await Wait.Frames(frames);
+    return value;
+}
+
+[Test]
+async Task WaitsCountFramesAndConditions()
+{
+    int ticks = 0;
+    Task counter = Wait.Every(0.05f, () =>
+    {
+        ticks += 1;
+        return ticks < 4;
+    });
+    Assert.True(await Wait.Until(() => ticks >= 4, 2.0f));
+    Assert.True(counter.IsCompleted);
+    Assert.False(await Wait.Until(() => ticks > 100, 0.1f));
+}
+
+[Test]
+async Task WaitsForTasksWithTimeouts()
+{
+    Task<int> quick = SlowValue(2, 7);
+    Assert.True(await Wait.For(quick, 1.0f));
+    Assert.Equal(7, quick.Result);
+    Task<int> slow = SlowValue(120, 1);
+    Assert.False(await Wait.For(slow, 0.25f));
+    Assert.False(slow.IsCompleted);
+    slow.Cancel();
+}

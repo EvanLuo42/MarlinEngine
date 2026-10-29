@@ -1,0 +1,50 @@
+!Version "1.0"
+
+// World profiles (Documentation/Architecture/05 §1.1): section `WorldProfiles.<Name>`, looked up by name. Platform
+// layers, the project and the user override them or add their own in their own WorldProfiles.mtext.
+
+Game
+{
+    Sets = ["CoreSimulationSet", "GameplaySet", "PhysicsSet", "PresentationSet"]
+    Clock = Fixed
+    // RECOVERY-DECISION D2: NetRole of Game not recovered; Standalone per 05 §1.1.
+    NetRole = Standalone
+    Rendering = true
+}
+
+Server
+{
+    Sets = ["CoreSimulationSet", "GameplaySet", "PhysicsSet", "NetServerSet"]
+    Clock = Fixed
+    NetRole = Server
+    Rendering = false
+}
+
+Client
+{
+    Base = "Game"
+    Sets += ["NetClientSet"]
+    NetRole = Client
+}
+
+EditorEdit
+{
+    Sets = ["CoreSimulationSet", "PresentationSet"]
+    Clock = Paused
+    NetRole = None
+    Rendering = true
+}
+
+EditorSimulate
+{
+    Base = "EditorEdit"
+    Sets += ["PhysicsSet", "GameplaySet"]
+    Clock = Fixed
+}
+
+// RECOVERY-DECISION D2: only Clock = Variable and no GameplaySet are recovered for AssetPreview; it derives from EditorEdit.
+AssetPreview
+{
+    Base = "EditorEdit"
+    Clock = Variable
+}

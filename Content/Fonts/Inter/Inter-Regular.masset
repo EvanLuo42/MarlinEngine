@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "6b48b301-2230-4bb9-8198-c5ad1a7efe51"
+    !Name = "Inter-Regular"
+    SourceFile = `source:Inter-Regular.ttf#c14a615b-5f88-445c-849c-b8cde7528976`
+    FaceIndex = 0
+}

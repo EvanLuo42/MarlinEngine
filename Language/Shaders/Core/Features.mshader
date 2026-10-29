@@ -1,0 +1,12 @@
+/// The optional device features of the engine (MarlinLanguage.md §9.7). Plugins and platform layers may declare
+/// more in their own Language/Shaders/; each backend registers the ones it supports.
+namespace Marlin.Features;
+
+/// Shader execution reordering: HitObject and ReorderThread (§9.8).
+public const Feature ShaderExecutionReorder = Feature("ShaderExecutionReorder");
+/// Cooperative vectors: CoopVector, MatrixRef and MatMul (§9.9).
+public const Feature CooperativeVector = Feature("CooperativeVector");
+/// The training operations of cooperative vectors (§9.9).
+public const Feature CooperativeVectorTraining = Feature("CooperativeVectorTraining");
+/// Cooperative matrices: CoopMatrix and MulAdd (§9.9).
+public const Feature CooperativeMatrix = Feature("CooperativeMatrix");

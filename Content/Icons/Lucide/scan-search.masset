@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "91098040-2308-59cf-81c1-035df4a72322"
+    !Name = "scan-search"
+    SourceFile = `source:scan-search.svg#bc141a6c-88a1-44cf-8c0f-2abb7a3da94c`
+}

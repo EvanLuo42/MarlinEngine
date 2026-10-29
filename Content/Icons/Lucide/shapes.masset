@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "5ac4a333-6ea6-5908-8490-8b59d2674ec8"
+    !Name = "shapes"
+    SourceFile = `source:shapes.svg#d580eca0-7cb3-4016-9f5c-47a507ea4f86`
+}

@@ -1,0 +1,12 @@
+# Developer machines on the office network: read the cache CI writes, never write it, so a
+# local experiment can't poison the shared cache.
+#   marlin generate --preset Team
+
+[cache]
+enabled = true
+path = '\\nas\fastbuild-cache'    # TODO: the team's cache share (same as CI.toml)
+mode = "read"
+
+[distribution]
+enabled = true
+brokerage_path = '\\nas\fastbuild-brokerage'    # TODO: the team's brokerage share

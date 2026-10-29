@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "0f235074-97fb-5135-a598-62e42d2e41d9"
+    !Name = "pencil"
+    SourceFile = `source:pencil.svg#b6da5e92-91f8-40eb-9bb8-786d6a8bd219`
+}

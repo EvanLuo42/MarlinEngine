@@ -1,0 +1,7 @@
+!Version "1.0"
+
+// What the Sandbox opens when it runs as a game.
+Product
+{
+    StartupLevel = </Project/Content/Levels/Sandbox:Sandbox#5a4d0b0c-6e1f-4c3a-9d2b-7c1e8f0a5b01>
+}

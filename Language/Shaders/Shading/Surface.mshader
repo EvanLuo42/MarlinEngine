@@ -1,0 +1,176 @@
+/// Substrate-style surfaces (Documentation/Architecture/07 §4.2): a material's Evaluate returns a Surface, a value tree
+/// of Slabs combined by HorizontalMix, VerticalLayer and Weight, or a custom BSDF (§4.3). Its shape must be known at
+/// compile time (MarlinLanguage §9.4): the operations below build the flattened closure list directly, and its count
+/// has to fold to a constant, which Compiler.Require checks once the material pass is inlined and folded.
+namespace Marlin.Shading;
+
+/// The most closures a pixel holds.
+public const uint MaxClosures = 4;
+/// The closure type of a Slab; a custom BSDF's is Compiler.TypeId of its struct, never zero.
+public const uint SlabClosure = 0;
+
+/// One layer of matter: a diffuse base under a GGX specular lobe, with an optional fuzz (sheen) on top and emission.
+public struct Slab
+{
+    /// Diffuse albedo for dielectrics, specular color for metals.
+    public half3 Albedo = half3(0.18h, 0.18h, 0.18h);
+    public half Roughness = 0.5h;
+    public half Metallic = 0.0h;
+    /// Dielectric reflectance at normal incidence as a fraction of 8%: 0.5 is 4%, as most dielectrics.
+    public half Specular = 0.5h;
+    /// The shading normal in world space; zero for the surface's own.
+    public float3 Normal = float3(0, 0, 0);
+    /// Fuzz amount, its color and roughness: dust or cloth fibres over the slab.
+    public half Fuzz = 0.0h;
+    public half3 FuzzColor = half3(1.0h, 1.0h, 1.0h);
+    public half FuzzRoughness = 0.5h;
+    /// Emitted radiance, in the units of the lights.
+    public half3 Emission = half3(0.0h, 0.0h, 0.0h);
+    /// As a layer over others (Surface.VerticalLayer): the fraction of light that crosses one unit of its thickness
+    /// straight down, per channel. White is a clear layer, which only reflects at its surface; darker colors absorb,
+    /// and what the layer does not let through it scatters with its own diffuse.
+    public half3 TransmittanceColor = half3(1.0h, 1.0h, 1.0h);
+
+    public static readonly Slab Default = new Slab();
+
+    /// Reflectance at normal incidence.
+    public half3 F0 => Lerp(half3(0.08h * Specular, 0.08h * Specular, 0.08h * Specular), Albedo,
+                            half3(Metallic, Metallic, Metallic));
+    /// The diffuse color: none for metals.
+    public half3 DiffuseColor => Albedo * (1.0h - Metallic);
+    /// Whether only the base parameters are used: a Simple tile's pixels (07 §4.2).
+    public bool IsSimple => Fuzz == 0.0h;
+}
+
+/// One closure of a surface: a Slab, or a custom BSDF's fields as words, with its share of the pixel, and the layers
+/// over it.
+public struct Closure
+{
+    [NoDiff] public uint Type;
+    public half Weight;
+    public Slab Slab;
+    [NoDiff] public uint[8] Payload;
+    /// What the layers over it stop straight down, per channel (one minus their transmittance), and how much their
+    /// surfaces reflect at normal incidence: light reaching it crosses them twice, losing (1 - CoatOpacity)^(1/cos)
+    /// each way and the Fresnel reflection of their surface. Zero, as `default` leaves it, for a closure nothing
+    /// covers.
+    public half3 CoatOpacity;
+    public half CoatSpecular;
+
+    /// What the layers over it let through straight down.
+    public half3 CoatTransmittance => half3(1.0h, 1.0h, 1.0h) - CoatOpacity;
+    /// Whether some layer covers it.
+    public bool IsCoated => CoatSpecular > 0.0h || Dot(CoatOpacity, half3(1.0h, 1.0h, 1.0h)) > 0.0h;
+}
+
+/// A surface: its closures, flattened, and how many there are.
+public struct Surface
+{
+    public Closure[4] Closures;
+    [NoDiff] public uint Count;
+
+    /// A surface of one slab.
+    [Differentiable]
+    public static Surface FromSlab(Slab slab)
+    {
+        Surface surface = default;
+        surface.Closures[0].Type = SlabClosure;
+        surface.Closures[0].Weight = 1.0h;
+        surface.Closures[0].Slab = slab;
+        surface.Count = 1;
+        return surface;
+    }
+
+    /// A surface of one custom BSDF (07 §4.3): its closure type is the BSDF's ID, its payload the BSDF's fields.
+    [Differentiable]
+    public static Surface Custom<T>(T bsdf) where T : IBsdf
+    {
+        Surface surface = default;
+        surface.Closures[0].Type = Compiler.TypeId<T>();
+        surface.Closures[0].Weight = 1.0h;
+        surface.Closures[0].Payload = Compiler.ToWords(bsdf);
+        surface.Count = 1;
+        return surface;
+    }
+
+    /// *a* and *b* side by side, *b* covering *mix* of the pixel.
+    [Differentiable]
+    public static Surface HorizontalMix(Surface a, Surface b, half mix)
+    {
+        half t = Saturate(mix);
+        return Concat(Weight(a, 1.0h - t), Weight(b, t));
+    }
+
+    [Differentiable]
+    public static Surface HorizontalMix(Slab a, Slab b, half mix) => HorizontalMix(FromSlab(a), FromSlab(b), mix);
+
+    /// *top* as a layer *thickness* units thick over *bottom* (07 §4.2): its first Slab is the layer's matter. Light
+    /// reaches the bottom through the layer's surface and TransmittanceColor^thickness of it, both ways; the top's own
+    /// diffuse scatters what the layer does not let through, so a thin clear layer only adds its reflection and a thick
+    /// one hides the bottom. A metal layer lets nothing through. Coverage is HorizontalMix's.
+    [Differentiable]
+    public static Surface VerticalLayer(Surface top, Surface bottom, half thickness)
+    {
+        Slab matter = top.Closures[0].Slab;
+        float depth = Max((float)thickness, 0.0);
+        float3 color = Max((float3)Saturate(matter.TransmittanceColor), float3(1e-4, 1e-4, 1e-4));
+        float3 through = Exp2(Log2(color) * depth) * (1.0 - (float)matter.Metallic);
+        half3 transmittance = (half3)through;
+        half reflectance = (half)(Dot((float3)matter.F0, float3(1, 1, 1)) / 3.0);
+        Surface upper = top;
+        Surface lower = bottom;
+        [Unroll]
+        for (uint i = 0; i < MaxClosures; ++i)
+        {
+            Slab slab = top.Closures[i].Slab;
+            upper.Closures[i].Slab.Albedo =
+                Lerp(slab.Albedo * (half3(1.0h, 1.0h, 1.0h) - transmittance), slab.Albedo,
+                     half3(slab.Metallic, slab.Metallic, slab.Metallic));
+            lower.Closures[i].CoatOpacity =
+                half3(1.0h, 1.0h, 1.0h) - bottom.Closures[i].CoatTransmittance * transmittance;
+            lower.Closures[i].CoatSpecular =
+                1.0h - (1.0h - bottom.Closures[i].CoatSpecular) * (1.0h - reflectance);
+        }
+        return Concat(upper, lower);
+    }
+
+    [Differentiable]
+    public static Surface VerticalLayer(Slab top, Slab bottom, half thickness)
+        => VerticalLayer(FromSlab(top), FromSlab(bottom), thickness);
+
+    /// *surface* covering *weight* of the pixel.
+    [Differentiable]
+    public static Surface Weight(Surface surface, half weight)
+    {
+        Surface result = surface;
+        [Unroll]
+        for (uint i = 0; i < MaxClosures; ++i)
+        {
+            result.Closures[i].Weight = surface.Closures[i].Weight * weight;
+        }
+        return result;
+    }
+
+    /// The closures of *a*, then those of *b*.
+    [Differentiable]
+    public static Surface Concat(Surface a, Surface b)
+    {
+        Compiler.Require(a.Count + b.Count <= MaxClosures, "a Surface holds at most 4 closures, and its shape must be known at compile time");
+        // Constant indices only, so that once the counts fold the closures stay in registers for differentiation.
+        Surface result = a;
+        [Unroll]
+        for (uint j = 0; j < MaxClosures; ++j)
+        {
+            [Unroll]
+            for (uint k = 0; k < MaxClosures; ++k)
+            {
+                if (k < b.Count && a.Count + k == j)
+                {
+                    result.Closures[j] = b.Closures[k];
+                }
+            }
+        }
+        result.Count = a.Count + b.Count;
+        return result;
+    }
+}

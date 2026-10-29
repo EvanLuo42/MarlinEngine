@@ -1,0 +1,10 @@
+---
+# Test functions are registered by generated code, so they cannot have internal linkage, and tests copy, move and
+# compare values only to check what that does.
+InheritParentConfig: true
+Checks: >
+  -misc-use-internal-linkage,
+  -misc-const-correctness,
+  -misc-redundant-expression,
+  -performance-unnecessary-copy-initialization,
+...

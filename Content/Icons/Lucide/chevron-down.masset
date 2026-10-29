@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "5cae98fc-e70f-5aeb-ac7f-cf069522ee4d"
+    !Name = "chevron-down"
+    SourceFile = `source:chevron-down.svg#f2702997-bf75-49b5-bfb3-7eed7e843939`
+}

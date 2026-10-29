@@ -1,0 +1,201 @@
+/// Tests of Marlin.Collections (MarlinScript §10.1).
+namespace Marlin.Tests;
+
+using Marlin.Collections;
+
+[Test]
+void ListsGrowInsertAndRemove()
+{
+    var items = new List<int>();
+    for (int i = 0; i < 100; i++)
+    {
+        items.Add(i);
+    }
+    Assert.Equal(100, items.Count);
+    Assert.True(items.Capacity >= 100);
+    items.Insert(0, -1);
+    Assert.Equal(-1, items[0]);
+    Assert.Equal(99, items[100]);
+    items.RemoveAt(0);
+    Assert.Equal(0, items[0]);
+    items.RemoveAtSwapBack(0);
+    Assert.Equal(99, items[0]);
+    Assert.Equal(99, items.Count);
+    items[1] = 42;
+    Assert.Equal(42, items.ToArray()[1]);
+    items.Clear();
+    Assert.Equal(0, items.Count);
+}
+
+[Test]
+void ListsEnumerateInOrder()
+{
+    var names = new List<string>(2);
+    names.Add("a");
+    names.Add("b");
+    names.Add("c");
+    Assert.Equal(3, names.Count);
+    string joined = "";
+    foreach (string name in names)
+    {
+        joined = joined + name;
+    }
+    Assert.Equal("abc", joined);
+    names.Reserve(64);
+    Assert.True(names.Capacity >= 64);
+}
+
+[Test]
+void DictionariesMapKeysToValues()
+{
+    var ages = new Dictionary<string, int>();
+    ages.Add("ada", 36);
+    ages["alan"] = 41;
+    ages["ada"] = 37;
+    Assert.Equal(2, ages.Count);
+    Assert.Equal(37, ages["ada"]);
+    Assert.True(ages.ContainsKey("alan"));
+    Assert.False(ages.TryAdd("alan", 1));
+    int age;
+    Assert.True(ages.TryGetValue("al" + "an", out age));
+    Assert.Equal(41, age);
+    Assert.False(ages.TryGetValue("grace", out age));
+    Assert.Equal(-1, ages.GetValueOrDefault("grace", -1));
+    Assert.True(ages.Remove("ada"));
+    Assert.False(ages.Remove("ada"));
+    Assert.Equal(1, ages.Count);
+}
+
+[Test]
+void DictionariesGrowAndReuseRemovedEntries()
+{
+    var squares = new Dictionary<int, long>();
+    for (int i = 0; i < 1000; i++)
+    {
+        squares[i] = (long)i * i;
+    }
+    for (int i = 0; i < 1000; i += 2)
+    {
+        squares.Remove(i);
+    }
+    Assert.Equal(500, squares.Count);
+    for (int i = 1000; i < 1250; i++)
+    {
+        squares.Add(i, (long)i * i);
+    }
+    Assert.Equal(750, squares.Count);
+    long sum = 0;
+    int visited = 0;
+    foreach (var pair in squares)
+    {
+        Assert.Equal((long)pair.Key * pair.Key, pair.Value);
+        visited += 1;
+        sum += pair.Key;
+    }
+    Assert.Equal(750, visited);
+    Assert.Equal(250000L + 281125L, sum);
+    Assert.False(squares.ContainsKey(998));
+    Assert.Equal(999L * 999L, squares[999]);
+}
+
+[Test]
+void HashSetsKeepDistinctValues()
+{
+    var seen = new HashSet<float>();
+    Assert.True(seen.Add(1.5f));
+    Assert.False(seen.Add(1.5f));
+    Assert.True(seen.Add(0.0f));
+    Assert.False(seen.Add(-0.0f));
+    Assert.True(seen.Contains(-0.0f));
+    Assert.True(seen.Remove(1.5f));
+    Assert.Equal(1, seen.Count);
+    var runes = new HashSet<Rune>();
+    runes.Add(new Rune(65));
+    Assert.True(runes.Contains(new Rune(65)));
+}
+
+[Test]
+void ArraysCopyOverlappingRanges()
+{
+    int[] values = new int[5];
+    for (int i = 0; i < 5; i++)
+    {
+        values[i] = i;
+    }
+    values.CopyTo(1, values, 0, 4);
+    Assert.Equal(1, values[0]);
+    Assert.Equal(4, values[3]);
+    int start = 0;
+    values.CopyTo(start + 1, values, start, 3);
+    Assert.Equal(2, values[0]);
+}
+
+[Test]
+void QueuesAndStacksKeepTheirOrder()
+{
+    var queue = new Queue<int>();
+    var stack = new Stack<string>();
+    for (int i = 0; i < 6; i++)
+    {
+        queue.Enqueue(i);
+        stack.Push($"{i}");
+    }
+    Assert.Equal(0, queue.Dequeue());
+    Assert.Equal(1, queue.Dequeue());
+    for (int i = 6; i < 12; i++)
+    {
+        queue.Enqueue(i);
+    }
+    int expected = 2;
+    foreach (int value in queue)
+    {
+        Assert.Equal(expected, value);
+        expected += 1;
+    }
+    Assert.Equal(12, expected);
+    Assert.Equal("5", stack.Pop());
+    Assert.Equal("4", stack.Peek());
+    string top;
+    Assert.True(stack.TryPop(out top));
+    Assert.Equal("4", top);
+    Assert.Equal(4, stack.Count);
+}
+
+struct Score
+{
+    public string Name;
+    public int Points;
+
+    public Score(string name, int points)
+    {
+        Name = name;
+        Points = points;
+    }
+}
+
+[Test]
+void SortsAreStable()
+{
+    var numbers = new List<int>();
+    uint seed = 7;
+    for (int i = 0; i < 200; i++)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        numbers.Add((int)(seed >> 20) % 50);
+    }
+    numbers.Sort();
+    for (int i = 1; i < numbers.Count; i++)
+    {
+        Assert.True(numbers[i - 1] <= numbers[i]);
+    }
+    var scores = new Score[] { new Score("a", 3), new Score("b", 1), new Score("c", 3), new Score("d", 1) };
+    scores.Sort((x, y) => y.Points.CompareTo(x.Points));
+    Assert.Equal("a", scores[0].Name);
+    Assert.Equal("c", scores[1].Name);
+    Assert.Equal("b", scores[2].Name);
+    Assert.Equal("d", scores[3].Name);
+    var words = new string[] { "pear", "apple", "fig" };
+    words.Sort();
+    Assert.Equal("apple", words[0]);
+    Assert.Equal("pear", words[2]);
+}

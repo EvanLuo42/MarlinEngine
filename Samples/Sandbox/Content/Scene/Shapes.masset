@@ -1,0 +1,92 @@
+!Version "1.0"
+
+MeshSource
+{
+    !UUID = "ea50f4bd-1923-57eb-8b3d-bafb6483d03d"
+    !Name = "Shapes_Ground"
+    SourceFile = `source:Shapes.gltf#8748d842-855b-435e-bc1c-da1498ea575b`
+    Mesh = "Ground"
+}
+
+MeshSource
+{
+    !UUID = "423b744b-8310-5d38-b996-548f72a2c71d"
+    !Name = "Shapes_Sphere"
+    SourceFile = `source:Shapes.gltf#8748d842-855b-435e-bc1c-da1498ea575b`
+    Mesh = "Sphere"
+}
+
+MeshSource
+{
+    !UUID = "83d3c236-9207-553b-a92f-495d309f3abc"
+    !Name = "Shapes_Torus"
+    SourceFile = `source:Shapes.gltf#8748d842-855b-435e-bc1c-da1498ea575b`
+    Mesh = "Torus"
+    Slots = { Default = </Content/Materials/Toon:Toon#dede5f55-716f-487d-a1c5-37e780a6c08e> }
+}
+
+MeshSource
+{
+    !UUID = "d37d6106-c84a-5363-8e40-8b52a1db4cb2"
+    !Name = "Shapes_Cube"
+    SourceFile = `source:Shapes.gltf#8748d842-855b-435e-bc1c-da1498ea575b`
+    Mesh = "Cube"
+}
+
+MeshImportOptions
+{
+    !UUID = "9be7b52d-ef8d-5dc0-a2c1-73211a987b80"
+    !Name = "Shapes_ImportOptions"
+    Combine = false
+}
+
+PrefabEntity
+{
+    !UUID = "abf97034-f070-5813-a434-4b95a665c542"
+    !Name = "Ground"
+    Components =
+    {
+        LocalTransform = {}
+        RenderMesh = { Mesh = <#ea50f4bd-1923-57eb-8b3d-bafb6483d03d> }
+    }
+}
+
+PrefabEntity
+{
+    !UUID = "897a42c5-b660-5671-9286-5e5697e9e35c"
+    !Name = "Sphere"
+    Components =
+    {
+        LocalTransform = {}
+        RenderMesh = { Mesh = <#423b744b-8310-5d38-b996-548f72a2c71d> }
+    }
+}
+
+PrefabEntity
+{
+    !UUID = "d723b622-1f88-5cbd-94c6-d501664c7736"
+    !Name = "Torus"
+    Components =
+    {
+        LocalTransform = {}
+        RenderMesh = { Mesh = <#83d3c236-9207-553b-a92f-495d309f3abc> }
+    }
+}
+
+PrefabEntity
+{
+    !UUID = "0cc685f5-d881-53ae-a8ae-0396bbf7861e"
+    !Name = "Cube"
+    Components =
+    {
+        LocalTransform = {}
+        RenderMesh = { Mesh = <#d37d6106-c84a-5363-8e40-8b52a1db4cb2> }
+    }
+}
+
+Prefab
+{
+    !UUID = "93a3b533-5149-58f6-a67a-82541bbdaaf8"
+    !Name = "Shapes"
+    Members = [<#abf97034-f070-5813-a434-4b95a665c542>, <#897a42c5-b660-5671-9286-5e5697e9e35c>, <#d723b622-1f88-5cbd-94c6-d501664c7736>, <#0cc685f5-d881-53ae-a8ae-0396bbf7861e>]
+}

@@ -1,0 +1,107 @@
+/// Tests of the core library (MarlinScript §10, §15).
+namespace Marlin.Tests;
+
+[Test]
+void StringsConcatenateAndSlice()
+{
+    string text = "hello" + " " + "world";
+    Assert.Equal(11, text.Length);
+    Assert.Equal("lo w", text.Substring(3, 4));
+    Assert.True(text.StartsWith("hell"));
+    Assert.True(text.EndsWith("rld"));
+    Assert.True(text.Contains("o w"));
+    Assert.False(text.Contains("xyz"));
+}
+
+[Test]
+void InterpolationFormats()
+{
+    int value = 42;
+    float ratio = 1.5f;
+    Assert.Equal("002A 1.50 007 42", $"{value:X4} {ratio:F2} {7:D3} {value}");
+    Assert.Equal("True 2.5", $"{value > 0} {2.5}");
+}
+
+[Test]
+void BoxingKeepsValues()
+{
+    object boxed = 41;
+    object same = 41;
+    Assert.Equal(42, (int)boxed + 1);
+    Assert.True(boxed.Equals(same));
+    Assert.True(boxed is int);
+    Assert.False(boxed is string);
+}
+
+[Test]
+void DelegatesCombineAndRemove()
+{
+    int calls = 0;
+    Action one = () => calls += 1;
+    Action ten = () => calls += 10;
+    Action both = one + ten;
+    both();
+    Assert.Equal(11, calls);
+    Action left = both - ten;
+    left();
+    Assert.Equal(12, calls);
+}
+
+[Test]
+void LoopClosuresCaptureEachIteration()
+{
+    var readers = new Func<int>[3];
+    for (int i = 0; i < 3; i++)
+    {
+        int copy = i * 10;
+        readers[i] = () => copy;
+    }
+    Assert.Equal(0, readers[0]());
+    Assert.Equal(20, readers[2]());
+}
+
+IEnumerable<int> Numbers(int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        yield return i;
+    }
+}
+
+[Test]
+void IteratorsYieldInOrder()
+{
+    int total = 0;
+    int last = -1;
+    foreach (int value in Numbers(5))
+    {
+        Assert.True(value > last);
+        last = value;
+        total += value;
+    }
+    Assert.Equal(10, total);
+}
+
+async Task<int> Doubled(int value)
+{
+    await Frame.Next();
+    return value * 2;
+}
+
+[Test]
+async Task TasksResumeOnLaterFrames()
+{
+    int first = await Doubled(4);
+    Assert.Equal(8, first);
+    int second = await Doubled(first);
+    Assert.Equal(16, second);
+}
+
+[Test]
+void MathIsDeterministic()
+{
+    Assert.Equal(0.0f, Sin(0.0f));
+    Assert.Equal(1.0f, Cos(0.0f));
+    Assert.Equal(8.0, Pow(2.0, 3.0));
+    Assert.Equal(3.0f, Sqrt(9.0f));
+}

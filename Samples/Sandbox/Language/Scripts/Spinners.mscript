@@ -1,0 +1,49 @@
+/// A small use of the script ECS (MarlinScript §11.2): a component, a system that makes entities and one that updates
+/// them. Both run in any world whose profile has the GameplaySet, such as a Game world.
+namespace Sandbox;
+
+[Component]
+public struct Spinner
+{
+    /// Turns per second.
+    public float Speed;
+    /// Degrees, from 0 up to 360.
+    public float Angle;
+    public int Turns;
+}
+
+public static class SpinnerDemo
+{
+    public static bool Spawned;
+}
+
+/// Makes three spinners in the first fixed step; the world creates them when the phase ends.
+[System]
+public void SpawnSpinners()
+{
+    if (SpinnerDemo.Spawned)
+    {
+        return;
+    }
+    SpinnerDemo.Spawned = true;
+    for (int i = 1; i <= 3; i++)
+    {
+        Entity spinner = Entities.Create();
+        spinner.Set(new Spinner { Speed = i });
+    }
+}
+
+[System(UpdateAfter = "Sandbox.SpawnSpinners")]
+public void Spin(Entity entity, ref Spinner spinner)
+{
+    spinner.Angle += spinner.Speed * 360.0f * Time.Delta;
+    while (spinner.Angle >= 360.0f)
+    {
+        spinner.Angle -= 360.0f;
+        spinner.Turns++;
+        if (spinner.Turns == 1)
+        {
+            Debug.Print($"Spinner {entity.Index} finished its first turn");
+        }
+    }
+}

@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "45bd504c-0ea4-5f4b-99c6-862e33f5a9ad"
+    !Name = "map"
+    SourceFile = `source:map.svg#e6186eed-43bd-419d-a96c-e233b2a2e268`
+}

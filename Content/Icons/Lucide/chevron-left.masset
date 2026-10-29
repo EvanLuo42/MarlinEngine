@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "b7dfacb0-b1f1-5c4c-a719-8f9fd7462b65"
+    !Name = "chevron-left"
+    SourceFile = `source:chevron-left.svg#3c760322-23a3-4902-b198-af2c900c6058`
+}

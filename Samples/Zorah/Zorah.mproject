@@ -1,0 +1,7 @@
+!Version "1.0"
+
+// NVIDIA's Zorah geometry (a 1.6 G triangle glTF) as a stress test for mesh conversion and streaming. Its Content is not
+// versioned: put zorah_main_public.v2.gltf and .bin in Content/Zorah, import it, then generate Content/Levels/Zorah.
+Project
+{
+}

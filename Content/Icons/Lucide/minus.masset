@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "7def7aa6-a0c7-50b6-bef2-0bbdd1232bc1"
+    !Name = "minus"
+    SourceFile = `source:minus.svg#b61cc408-8778-479b-8a75-57765ade0ba6`
+}

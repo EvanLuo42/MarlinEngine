@@ -1,0 +1,429 @@
+/// The tile rasterizer of UIPainter (Documentation/Architecture/09 §2): one 16×16 group per tile walks the commands
+/// binned to its tile in painting order, evaluates each one's analytic coverage per pixel and blends in registers,
+/// then writes the tile once: no triangles, no overdraw.
+namespace Marlin.Passes.Ui;
+
+public struct UiImage
+{
+    public Texture2D<float4> Texture;
+}
+
+/// What both raster entry points read.
+public struct UiRasterInputs
+{
+    public float4 Clear;
+    public Span<UiCommand> Commands;
+    public Span<uint> TileOffsets;
+    public Span<uint> TileCounts;
+    public Span<uint> TileCommands;
+    public Span<UiBrush> Brushes;
+    public Span<UiGradientStop> Stops;
+    public Span<UiTransform> Transforms;
+    public Span<UiClip> Clips;
+    public Span<UiCurve> Curves;
+    public Span<uint> OutlineWords;
+    public Span<UiCurve> GlyphCurves;
+    public Span<uint> GlyphWords;
+    public Span<UiImage> Images;
+    public Texture2D<float> Atlas;
+    public Texture2D<float4> Background;
+    public Sampler LinearSampler;
+    public Sampler PointSampler;
+    public uint TilesX;
+    public uint FirstCommand;
+    public uint EndCommand;
+    /// Encoding in the low byte; bit 8 set when Background holds what earlier commands painted.
+    public uint Flags;
+    public float OriginX;
+    public float OriginY;
+    public float WhiteNits;
+}
+
+public struct UiSurfaceArguments
+{
+    public UiRasterInputs Inputs;
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgb10a2Unorm> Output;
+}
+
+public struct UiLayerArguments
+{
+    public UiRasterInputs Inputs;
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f> Output;
+}
+
+[GroupShared] static uint[4096] TileList;
+[GroupShared] static UiCommand[64] Batch;
+
+float2 ToLocal(UiTransform transform, float2 p) =>
+    float2(transform.M11 * p.x + transform.M21 * p.y + transform.Dx, transform.M12 * p.x + transform.M22 * p.y + transform.Dy);
+
+float4 StopColor(in UiRasterInputs args, UiBrush brush, float t)
+{
+    uint count = brush.StopCount;
+    UiGradientStop first = args.Stops[brush.StopOffset];
+    if (t <= first.Offset)
+    {
+        return first.Color;
+    }
+    UiGradientStop previous = first;
+    for (uint i = 1; i < count; i++)
+    {
+        UiGradientStop next = args.Stops[brush.StopOffset + i];
+        if (t <= next.Offset)
+        {
+            float span = Max(next.Offset - previous.Offset, 1e-6);
+            return Lerp(previous.Color, next.Color, float4(1, 1, 1, 1) * Saturate((t - previous.Offset) / span));
+        }
+        previous = next;
+    }
+    return previous.Color;
+}
+
+/// The premultiplied color of *brush* at local point *p*.
+float4 BrushColor(in UiRasterInputs args, uint brushIndex, float2 p)
+{
+    UiBrush brush = args.Brushes[brushIndex];
+    if (brush.Kind == BrushSolid || brush.StopCount == 0)
+    {
+        return brush.Color;
+    }
+    float2 start = float2(brush.Geometry[0], brush.Geometry[1]);
+    float t = 0;
+    if (brush.Kind == BrushLinear)
+    {
+        float2 axis = float2(brush.Geometry[2], brush.Geometry[3]) - start;
+        t = Dot(p - start, axis) / Max(Dot(axis, axis), 1e-12);
+    }
+    else if (brush.Kind == BrushRadial)
+    {
+        t = Length(p - start) / Max(brush.Geometry[2], 1e-6);
+    }
+    else
+    {
+        float2 d = p - start;
+        t = Fract((Atan2(d.y, d.x) - brush.Geometry[2]) * 0.15915494);
+    }
+    return StopColor(args, brush, t);
+}
+
+float ClipCoverage(in UiRasterInputs args, uint clipIndex, float2 device)
+{
+    if (clipIndex == 0)
+    {
+        return 1;
+    }
+    UiClip clip = args.Clips[clipIndex];
+    float4 r = clip.DeviceRect;
+    float coverage = Saturate(device.x - r.x + 0.5) * Saturate(r.z - device.x + 0.5) * Saturate(device.y - r.y + 0.5) *
+                     Saturate(r.w - device.y + 0.5);
+    uint shaped = clip.Shaped != 0 ? clipIndex : clip.Parent;
+    for (uint depth = 0; depth < 16 && shaped != 0 && coverage > 0; depth++)
+    {
+        UiClip entry = args.Clips[shaped];
+        UiTransform transform = args.Transforms[entry.Transform];
+        float distance = RoundedRectDistance(ToLocal(transform, device), entry.Rect, entry.Radii);
+        coverage *= CoverageFromDistance(distance, transform.PixelSize);
+        shaped = entry.Parent;
+    }
+    return coverage;
+}
+
+float4 SampleImage(in UiRasterInputs args, uint image, float2 uv, bool point, uint range)
+{
+    Texture2D<float4> texture = args.Images[image].Texture;
+    float4 value = point ? texture.SampleLevel(args.PointSampler, uv, 0) : texture.SampleLevel(args.LinearSampler, uv, 0);
+    if (range == 1)
+    {
+        value.rgb = value.rgb / Max(args.WhiteNits, 1.0);
+    }
+    return float4(value.rgb * value.a, value.a);
+}
+
+/// The coverage of a shape command at *device*, or for images and canvases, its premultiplied color in *color*.
+float ShapeCoverage(in UiRasterInputs args, UiCommand command, float2 device, out float4 color, out bool colored)
+{
+    color = float4(0, 0, 0, 0);
+    colored = false;
+    uint kind = KindOf(command);
+    if (kind == KindCanvas || kind == KindBackdrop)
+    {
+        float4 bounds = float4(command.Data[0], command.Data[1], command.Data[2], command.Data[3]);
+        float2 uv = (device - bounds.xy) / Max(bounds.zw - bounds.xy, float2(1, 1));
+        Texture2D<float4> texture = args.Images[AsUInt(command.Data[5])].Texture;
+        color = texture.SampleLevel(args.PointSampler, uv, 0);
+        colored = true;
+        if (kind == KindBackdrop)
+        {
+            Texture2D<float4> mask = args.Images[AsUInt(command.Data[6])].Texture;
+            return Saturate(mask.SampleLevel(args.PointSampler, uv, 0).a * 64.0);
+        }
+        return 1;
+    }
+    UiTransform transform = args.Transforms[command.Transform];
+    float2 p = ToLocal(transform, device);
+    float pixel = transform.PixelSize;
+    if (kind == KindRoundedRect)
+    {
+        float4 rect = float4(command.Data[0], command.Data[1], command.Data[2], command.Data[3]);
+        float4 radii = float4(command.Data[4], command.Data[5], command.Data[6], command.Data[7]);
+        float distance = RoundedRectDistance(p, rect, radii);
+        float width = command.Data[8];
+        if (width > 0)
+        {
+            return CoverageFromDistance(distance, pixel) - CoverageFromDistance(distance + width, pixel);
+        }
+        return CoverageFromDistance(distance, pixel);
+    }
+    if (kind == KindEllipse)
+    {
+        float distance = EllipseDistance(p, float2(command.Data[0], command.Data[1]), float2(command.Data[2], command.Data[3]));
+        float width = command.Data[4];
+        if (width > 0)
+        {
+            return CoverageFromDistance(Abs(distance) - width * 0.5, pixel);
+        }
+        return CoverageFromDistance(distance, pixel);
+    }
+    if (kind == KindBoxShadow)
+    {
+        float4 rect = float4(command.Data[0], command.Data[1], command.Data[2], command.Data[3]);
+        float4 radii = float4(command.Data[4], command.Data[5], command.Data[6], command.Data[7]);
+        return BlurredCoverage(RoundedRectDistance(p, rect, radii), command.Data[8], pixel);
+    }
+    if (kind == KindStrokeLine)
+    {
+        return LineCoverage(p, float2(command.Data[0], command.Data[1]), float2(command.Data[2], command.Data[3]),
+                            command.Data[4], pixel, AsUInt(command.Data[5]));
+    }
+    if (kind == KindStrokeQuad)
+    {
+        return QuadStrokeCoverage(p, float2(command.Data[0], command.Data[1]), float2(command.Data[2], command.Data[3]),
+                                  float2(command.Data[4], command.Data[5]), command.Data[6], pixel,
+                                  AsUInt(command.Data[7]));
+    }
+    if (kind == KindDisk)
+    {
+        return CoverageFromDistance(Length(p - float2(command.Data[0], command.Data[1])) - command.Data[2], pixel);
+    }
+    if (kind == KindPolygon)
+    {
+        return PolygonCoverage(p, float2(command.Data[0], command.Data[1]), float2(command.Data[2], command.Data[3]),
+                               float2(command.Data[4], command.Data[5]), float2(command.Data[6], command.Data[7]), pixel);
+    }
+    if (kind == KindOutline)
+    {
+        uint record = AsUInt(command.Data[0]);
+        float2 origin = float2(command.Data[1], command.Data[2]);
+        float scale = command.Data[3];
+        float2 outlinePoint = (p - origin) / scale;
+        bool evenOdd = (FlagsOf(command) & FlagEvenOdd) != 0;
+        if ((FlagsOf(command) & FlagGlyphCache) != 0)
+        {
+            return OutlineCoverage(args.GlyphWords, args.GlyphCurves, record, outlinePoint, pixel / scale, evenOdd);
+        }
+        return OutlineCoverage(args.OutlineWords, args.Curves, record, outlinePoint, pixel / scale, evenOdd);
+    }
+    if (kind == KindAtlasGlyph)
+    {
+        float4 rect = float4(command.Data[0], command.Data[1], command.Data[2], command.Data[3]);
+        float2 t = (p - rect.xy) / Max(rect.zw - rect.xy, float2(1e-6, 1e-6));
+        if (t.x < 0 || t.y < 0 || t.x > 1 || t.y > 1)
+        {
+            return 0;
+        }
+        float2 uv = Lerp(float2(command.Data[4], command.Data[5]), float2(command.Data[6], command.Data[7]), t);
+        return args.Atlas.SampleLevel(args.LinearSampler, uv, 0);
+    }
+    if (kind == KindImage)
+    {
+        float4 rect = float4(command.Data[0], command.Data[1], command.Data[2], command.Data[3]);
+        float radius = command.Data[8];
+        float coverage = CoverageFromDistance(RoundedRectDistance(p, rect, float4(radius, radius, radius, radius)), pixel);
+        float2 t = (p - rect.xy) / Max(rect.zw - rect.xy, float2(1e-6, 1e-6));
+        float2 uv = Lerp(float2(command.Data[4], command.Data[5]), float2(command.Data[6], command.Data[7]), t);
+        bool point = (FlagsOf(command) & FlagPointSampling) != 0;
+        color = SampleImage(args, AsUInt(command.Data[9]), uv, point, AsUInt(command.Data[10]));
+        colored = true;
+        return coverage;
+    }
+    return 0;
+}
+
+float3 SrgbEncode(float3 linear)
+{
+    float3 low = linear * 12.92;
+    float3 high = 1.055 * Pow(Max(linear, float3(0, 0, 0)), float3(0.41666667, 0.41666667, 0.41666667)) - 0.055;
+    return Select(linear <= float3(0.0031308, 0.0031308, 0.0031308), low, high);
+}
+
+float3 PqEncode(float3 rec709, float whiteNits)
+{
+    float3 rec2020 = float3(Dot(rec709, float3(0.6274040, 0.3292820, 0.0433136)),
+                            Dot(rec709, float3(0.0690970, 0.9195400, 0.0113612)),
+                            Dot(rec709, float3(0.0163916, 0.0880132, 0.8955950)));
+    float3 y = Max(rec2020 * (whiteNits / 10000.0), float3(0, 0, 0));
+    float3 yp = Pow(y, float3(0.1593017578125, 0.1593017578125, 0.1593017578125));
+    float3 numerator = 0.8359375 + 18.8515625 * yp;
+    float3 denominator = 1.0 + 18.6875 * yp;
+    return Pow(numerator / denominator, float3(78.84375, 78.84375, 78.84375));
+}
+
+/// The first of the sorted TileList's *count* entries that is at least *value*.
+uint LowerBound(uint count, uint value)
+{
+    uint low = 0;
+    uint high = count;
+    while (low < high)
+    {
+        uint middle = (low + high) / 2;
+        if (TileList[middle] < value)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+/// Sorts the tile's command indices into painting order and returns the color of pixel *device* after them.
+float4 RasterTile(in UiRasterInputs args, uint3 group, uint lane, float2 device)
+{
+    uint tile = group.y * args.TilesX + group.x;
+    uint count = Min(args.TileCounts[tile], MaxTileCommands);
+    uint offset = args.TileOffsets[tile];
+    uint sorted = 1;
+    while (sorted < count)
+    {
+        sorted *= 2;
+    }
+    for (uint i = lane; i < sorted; i += 256)
+    {
+        TileList[i] = i < count ? args.TileCommands[offset + i] : 0xFFFFFFFFu;
+    }
+    Barrier.Group();
+    for (uint k = 2; k <= sorted; k *= 2)
+    {
+        for (uint j = k / 2; j > 0; j /= 2)
+        {
+            for (uint i = lane; i < sorted; i += 256)
+            {
+                uint partner = i ^ j;
+                if (partner > i)
+                {
+                    uint a = TileList[i];
+                    uint b = TileList[partner];
+                    bool ascending = (i & k) == 0;
+                    if ((a > b) == ascending)
+                    {
+                        TileList[i] = b;
+                        TileList[partner] = a;
+                    }
+                }
+            }
+            Barrier.Group();
+        }
+    }
+
+    float4 color = args.Clear;
+    if ((args.Flags & 0x100u) != 0)
+    {
+        color = args.Background.Load(int2(device - float2(args.OriginX, args.OriginY)), 0);
+    }
+    uint pendingGroup = 0xFFFFFFFFu;
+    uint pendingBrush = 0;
+    uint pendingTransform = 0;
+    float pendingCoverage = 0;
+    // The list is in command order, so a backdrop segment's commands are one run of it.
+    uint runStart = LowerBound(count, args.FirstCommand);
+    uint runEnd = LowerBound(count, args.EndCommand);
+    for (uint start = runStart; start < runEnd; start += 64)
+    {
+        if (lane < 64 && start + lane < runEnd)
+        {
+            Batch[lane] = args.Commands[TileList[start + lane]];
+        }
+        Barrier.Group();
+        uint batchCount = Min(runEnd - start, 64u);
+        for (uint b = 0; b < batchCount; b++)
+        {
+            UiCommand command = Batch[b];
+            if (command.Group != pendingGroup)
+            {
+                if (pendingCoverage > 0)
+                {
+                    float4 source = BrushColor(args, pendingBrush, ToLocal(args.Transforms[pendingTransform], device));
+                    color = source * pendingCoverage + color * (1.0 - source.a * pendingCoverage);
+                }
+                pendingGroup = command.Group;
+                pendingBrush = command.Brush;
+                pendingTransform = command.Transform;
+                pendingCoverage = 0;
+            }
+            if (device.x < command.Bounds[0] || device.y < command.Bounds[1] || device.x >= command.Bounds[2] ||
+                device.y >= command.Bounds[3])
+            {
+                continue;
+            }
+            float4 image = float4(0, 0, 0, 0);
+            bool colored = false;
+            float coverage = ShapeCoverage(args, command, device, out image, out colored) * ClipCoverage(args, command.Clip, device);
+            if (KindOf(command) == KindBackdrop)
+            {
+                color = Lerp(color, image, float4(1, 1, 1, 1) * Saturate(coverage));
+                pendingGroup = 0xFFFFFFFFu;
+                continue;
+            }
+            if (colored)
+            {
+                float4 tint = args.Brushes[command.Brush].Color;
+                float4 source = image * tint;
+                color = source * coverage + color * (1.0 - source.a * coverage);
+                pendingGroup = 0xFFFFFFFFu;
+                continue;
+            }
+            pendingCoverage = Max(pendingCoverage, Saturate(coverage));
+        }
+        Barrier.Group();
+    }
+    if (pendingCoverage > 0)
+    {
+        float4 source = BrushColor(args, pendingBrush, ToLocal(args.Transforms[pendingTransform], device));
+        color = source * pendingCoverage + color * (1.0 - source.a * pendingCoverage);
+    }
+    return color;
+}
+
+[Compute(16, 16, 1)]
+void RasterSurface([GroupId] uint3 group, [GroupThreadId] uint3 thread, [GroupIndex] uint lane,
+                   [Uniform] in UiSurfaceArguments args)
+{
+    int2 position = int2(group.xy * TileSize + thread.xy);
+    float2 device = float2(args.Inputs.OriginX, args.Inputs.OriginY) + float2(position) + float2(0.5, 0.5);
+    float4 color = RasterTile(args.Inputs, group, lane, device);
+    uint2 size = args.Output.Size;
+    if (position.x >= (int)size.x || position.y >= (int)size.y)
+    {
+        return;
+    }
+    float3 encoded = (args.Inputs.Flags & 0xFFu) == EncodePq ? PqEncode(color.rgb, args.Inputs.WhiteNits)
+                                                             : SrgbEncode(Saturate(color.rgb));
+    args.Output.Store(position, float4(encoded, 1));
+}
+
+[Compute(16, 16, 1)]
+void RasterLayer([GroupId] uint3 group, [GroupThreadId] uint3 thread, [GroupIndex] uint lane,
+                 [Uniform] in UiLayerArguments args)
+{
+    int2 position = int2(group.xy * TileSize + thread.xy);
+    float2 device = float2(args.Inputs.OriginX, args.Inputs.OriginY) + float2(position) + float2(0.5, 0.5);
+    float4 color = RasterTile(args.Inputs, group, lane, device);
+    uint2 size = args.Output.Size;
+    if (position.x >= (int)size.x || position.y >= (int)size.y)
+    {
+        return;
+    }
+    args.Output.Store(position, color);
+}

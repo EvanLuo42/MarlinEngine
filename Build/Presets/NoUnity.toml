@@ -1,0 +1,9 @@
+# Every source file compiled on its own, without PCH. Unity builds and PCHs hide missing
+# #includes; run this on CI (or before submitting a header refactor) to catch them.
+#   marlin generate --preset NoUnity   (combine: --preset CI --preset NoUnity)
+
+[unity]
+enabled = false
+
+[pch]
+enabled = false

@@ -1,0 +1,67 @@
+# Normalize line endings: text is LF in the repository, checked out as-is (the toolchain is clang on Windows).
+* text=auto eol=lf
+
+# Source and data
+*.h        text eol=lf diff=cpp
+*.hpp      text eol=lf diff=cpp
+*.inl      text eol=lf diff=cpp
+*.c        text eol=lf diff=cpp
+*.cpp      text eol=lf diff=cpp
+*.mm       text eol=lf diff=objc
+*.cs       text eol=lf diff=csharp
+*.py       text eol=lf diff=python
+*.hlsl     text eol=lf
+*.hlsli    text eol=lf
+*.slang    text eol=lf
+*.toml     text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf diff=markdown
+*.txt      text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
+# Lockfiles are generated: don't diff or merge them by hand
+uv.lock    -diff linguist-generated
+
+# Binary files
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.tga      binary
+*.dds      binary
+*.exr      binary
+*.hdr      binary
+*.ktx      binary
+*.ktx2     binary
+*.ico      binary
+*.gif      binary
+*.glb      binary
+*.bin      binary
+*.fbx      binary
+*.wav      binary
+*.ogg      binary
+*.mp4      binary
+*.ttf      binary
+*.otf      binary
+*.woff     binary
+*.woff2    binary
+*.pdf      binary
+*.zip      binary
+*.7z       binary
+*.exe      binary
+*.dll      binary
+*.lib      binary
+*.a        binary
+*.so       binary
+*.dylib    binary
+*.pdb      binary
+*.elf      binary
+
+# Third-party code is vendored as-is: no EOL rewriting, hidden from language stats
+/Source/ThirdParty/** -text linguist-vendored
+/Extras/**            -text linguist-vendored

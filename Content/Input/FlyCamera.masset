@@ -1,0 +1,72 @@
+!Version "1.0"
+
+// The engine's FlyCamera input (Documentation/Architecture/15 §3): hold the right mouse button to look around and
+// move with WASD, E and Q up and down, Shift faster and the wheel to change speed; or the gamepad's sticks, triggers
+// and left stick press.
+
+InputAction
+{
+    !UUID = "b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f"
+    !Name = "FlyCameraMove"
+    ValueType = Axis3D
+}
+
+InputAction
+{
+    !UUID = "f7b4551d-2842-46fe-a273-e317e26b4156"
+    !Name = "FlyCameraLook"
+    ValueType = Axis2D
+    Accumulate = true
+}
+
+InputAction
+{
+    !UUID = "d7daee5b-68ef-48fe-ae80-ae0964e17c15"
+    !Name = "FlyCameraSpeed"
+    ValueType = Axis1D
+    Accumulate = true
+}
+
+InputAction
+{
+    !UUID = "a25bb7ec-789a-46e1-ae2c-dbe6695a062a"
+    !Name = "FlyCameraBoost"
+    ValueType = Button
+}
+
+InputAction
+{
+    !UUID = "3507a810-28ea-4908-9ac0-a4225126795d"
+    !Name = "FlyCameraEngage"
+    ValueType = Button
+}
+
+InputContext
+{
+    !UUID = "3485a3a0-2720-4d0c-badb-94222a7c8b42"
+    !Name = "FlyCamera"
+    Priority = 0
+    Bindings = [
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraEngage#3507a810-28ea-4908-9ac0-a4225126795d> Control = "Mouse.Right" }
+
+        // Move: right, up and backward; the keys only while the right button is held.
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Keyboard.W" Chord = ["Mouse.Right"] XTo = Z Scale = (1, 1, -1) Name = "Forward" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Keyboard.S" Chord = ["Mouse.Right"] XTo = Z Name = "Backward" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Keyboard.A" Chord = ["Mouse.Right"] Scale = (-1, 1, 1) Name = "Left" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Keyboard.D" Chord = ["Mouse.Right"] Name = "Right" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Keyboard.E" Chord = ["Mouse.Right"] XTo = Y Name = "Up" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Keyboard.Q" Chord = ["Mouse.Right"] XTo = Y Scale = (1, -1, 1) Name = "Down" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Gamepad.LeftStick" YTo = Z Scale = (1, 1, -1) }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Gamepad.RightTrigger" XTo = Y }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraMove#b6eb9ed9-f6c8-4de3-a30e-26cbed6d166f> Control = "Gamepad.LeftTrigger" XTo = Y Scale = (1, -1, 1) }
+
+        // Look: radians of yaw and pitch, per count of mouse motion or per second of full stick.
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraLook#f7b4551d-2842-46fe-a273-e317e26b4156> Control = "Mouse.Delta" Chord = ["Mouse.Right"] Scale = (-0.0025, -0.0025, 1) }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraLook#f7b4551d-2842-46fe-a273-e317e26b4156> Control = "Gamepad.RightStick" Scale = (-2.5, 2.5, 1) }
+
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraSpeed#d7daee5b-68ef-48fe-ae80-ae0964e17c15> Control = "Mouse.Wheel" Chord = ["Mouse.Right"] }
+
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraBoost#a25bb7ec-789a-46e1-ae2c-dbe6695a062a> Control = "Keyboard.LeftShift" Name = "Boost" }
+        { Action = </Engine/Content/Input/FlyCamera:FlyCameraBoost#a25bb7ec-789a-46e1-ae2c-dbe6695a062a> Control = "Gamepad.LeftStickPress" }
+    ]
+}

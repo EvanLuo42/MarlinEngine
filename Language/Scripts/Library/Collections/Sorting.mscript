@@ -1,0 +1,81 @@
+/// Stable sorting (MarlinScript §10.1): a merge sort that keeps equal items in their original order, ordered by
+/// `CompareTo` (the core library's for scalars and strings, a type's own `CompareTo(T)` otherwise) or by a comparison.
+namespace Marlin.Collections;
+
+/// Sorts *count* items of *items* from *start* in ascending order.
+public void Sort<T>(this T[] items, int start, int count)
+{
+    SortRange(items, start, count, (a, b) => a.CompareTo(b));
+}
+
+public void Sort<T>(this T[] items)
+{
+    SortRange(items, 0, items.Length, (a, b) => a.CompareTo(b));
+}
+
+/// Sorts by *comparison*, negative when its first argument sorts before its second.
+public void Sort<T>(this T[] items, Func<T, T, int> comparison)
+{
+    SortRange(items, 0, items.Length, comparison);
+}
+
+internal void SortRange<T>(T[] items, int start, int count, Func<T, T, int> comparison)
+{
+    if (start < 0 || count < 0 || start + count > items.Length)
+    {
+        Panic($"items {start}..{start + count} are outside an array of {items.Length}");
+    }
+    if (count < 2)
+    {
+        return;
+    }
+    var scratch = new T[count];
+    MergeSort(items, scratch, start, start + count, comparison);
+}
+
+internal void MergeSort<T>(T[] items, T[] scratch, int begin, int end, Func<T, T, int> comparison)
+{
+    if (end - begin <= 16)
+    {
+        for (int i = begin + 1; i < end; i++)
+        {
+            T item = items[i];
+            int j = i - 1;
+            while (j >= begin && comparison(items[j], item) > 0)
+            {
+                items[j + 1] = items[j];
+                j -= 1;
+            }
+            items[j + 1] = item;
+        }
+        return;
+    }
+    int middle = begin + (end - begin) / 2;
+    MergeSort(items, scratch, begin, middle, comparison);
+    MergeSort(items, scratch, middle, end, comparison);
+    if (comparison(items[middle - 1], items[middle]) <= 0)
+    {
+        return;
+    }
+    int left = middle - begin;
+    items.CopyTo(begin, scratch, 0, left);
+    int a = 0;
+    int b = middle;
+    int to = begin;
+    while (a < left && b < end)
+    {
+        if (comparison(items[b], scratch[a]) < 0)
+        {
+            items[to] = items[b];
+            b += 1;
+        }
+        else
+        {
+            items[to] = scratch[a];
+            a += 1;
+        }
+        to += 1;
+    }
+    scratch.CopyTo(a, items, to, left - a);
+    scratch.Clear(0, left);
+}

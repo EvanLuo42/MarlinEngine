@@ -1,0 +1,43 @@
+!Version "1.0"
+
+// Windows layer of Engine.mtext: what differs from the engine defaults on PC GPUs.
+
+// RECOVERY-DECISION TM-D4: the Windows file was lost; the BC formats desktop GPUs sample, which the encoder modules
+// (Bc7EncRdoEncoder, IspcTextureEncoder for BC6H) write.
+Textures
+{
+    Compression =
+    {
+        Color =
+        {
+            Format = BC7
+        }
+        Normal =
+        {
+            Format = BC5
+        }
+        Mask =
+        {
+            Format = BC7
+        }
+        Grayscale =
+        {
+            Format = BC4
+        }
+        Hdr =
+        {
+            Format = BC6H
+        }
+        Uncompressed =
+        {
+            Format = RGBA8
+        }
+    }
+}
+
+// The user-mode GPU drivers (NVIDIA, AMD, Intel; Vulkan and D3D12): a crash inside one of them is reported with the
+// GPU's state, like a lost device.
+Rhi
+{
+    DriverModules = ["nvoglv64", "nvwgf2umx", "amdvlk64", "amdxc64", "igvk64", "igd12umd64"]
+}

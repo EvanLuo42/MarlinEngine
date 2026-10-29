@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "0e4f7389-a370-54e8-bce3-0594915ac92d"
+    !Name = "chevron-right"
+    SourceFile = `source:chevron-right.svg#1225420d-9f29-486e-a619-51c224e894f2`
+}

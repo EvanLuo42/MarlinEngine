@@ -1,0 +1,26 @@
+!Version "1.0"
+
+Material
+{
+    !UUID = "dede5f55-716f-487d-a1c5-37e780a6c08e"
+    !Name = "Toon"
+    Shader = </Engine/Language/Shaders/Materials/Toon:Marlin.Materials.Toon#d7ea0cfd-d7c4-45ad-8c77-dff3cfeff043>
+    Color = (0.2, 0.55, 0.9)
+    Steps = 3
+}
+
+MaterialInstance : <Toon#dede5f55-716f-487d-a1c5-37e780a6c08e>
+{
+    !UUID = "5b1e6f0a-3c2d-4e8f-9a71-0d4c2b8e6f13"
+    !Name = "ToonWarm"
+    Color = (0.95, 0.45, 0.2)
+}
+
+MaterialInstance : </Engine/Content/Materials/Default:Default#2a527f2c-9f27-4e67-8ae9-3dbcf5eb0ee6>
+{
+    !UUID = "7c3a9d21-5e4b-4f60-8b2a-1e9f0c7d4a58"
+    !Name = "Gold"
+    BaseColor = (1.0, 0.76, 0.33)
+    Roughness = 0.3
+    Metallic = 1
+}

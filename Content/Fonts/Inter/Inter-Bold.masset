@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "152535c6-e218-4701-9a9a-229fe3bbcbcf"
+    !Name = "Inter-Bold"
+    SourceFile = `source:Inter-Bold.ttf#ee5a3b55-c00f-49ff-88b4-535761decf0e`
+    FaceIndex = 0
+}

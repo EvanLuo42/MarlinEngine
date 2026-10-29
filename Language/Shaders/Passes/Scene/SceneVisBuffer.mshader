@@ -1,0 +1,274 @@
+/// The visibility buffer raster (Documentation/Architecture/07 §5.3): one mesh group per visible cluster that is large
+/// on screen, and a pixel shader that keeps the nearest surface with a 64-bit atomic max, the depth above the visible
+/// cluster and triangle; and a compute raster of the small ones, whose triangles cover few pixels each, that writes the
+/// same values. Depth is reversed, so nearer is larger and an empty pixel is zero. The pass has no attachments.
+namespace Marlin.Passes.Scene;
+
+public struct SceneVisBufferArguments
+{
+    public Span<SceneViewData> View;
+    public Span<SceneInstance> Instances;
+    public Span<SceneCluster> Clusters;
+    public Ptr<byte> Geometry;
+    public Span<SceneVisibleCluster> Visible;
+    /// The visible clusters this raster draws, by their index in Visible.
+    public Span<uint> Listed;
+    public Span<uint> Count;
+    public Span<ulong, Access.ReadWrite> VisBuffer;
+    /// With RasterOverdraw, a uint per pixel counting the fragments rastered there.
+    public Span<uint, Access.ReadWrite> Overdraw;
+    public uint MaxVisible;
+    public uint GroupsX;
+    /// 0 draws the first culling phase's clusters, 1 those the second phase appended after them.
+    public uint Phase;
+    /// RasterOverdraw: count fragments in Overdraw.
+    public uint Flags;
+}
+
+const uint RasterOverdraw = 1;
+
+/// Keeps *value* at *pixel* if it is nearer than what the pixel holds. A plain read first skips the atomic for the
+/// hidden fragments, most of them where many surfaces overlap: the pixel's value only grows, so a stale read can only
+/// let an atomic through, never drop a nearer fragment.
+void WriteVisBuffer(Span<ulong, Access.ReadWrite> visBuffer, uint pixel, ulong value)
+{
+    if (visBuffer[pixel] < value)
+    {
+        Atomic.Max(ref visBuffer[pixel], value);
+    }
+}
+
+/// A cluster's vertices: in pixels (x, y) and depth (z) for the software raster; clip x, y and w for the hardware
+/// raster's winding.
+[GroupShared] static float3[256] ScreenVertices;
+
+/// An odd number of negative scales mirrors the instance, which turns its windings around.
+bool IsMirrored(SceneInstance instance)
+{
+    return instance.ScaleX * instance.ScaleY * instance.ScaleZ < 0.0;
+}
+
+public struct SceneVisVertex
+{
+    [Position] public float4 Position;
+}
+
+public struct SceneVisPrimitive
+{
+    public uint Payload;
+}
+
+[Mesh(128, 1, 1, MaxVertices = 256, MaxPrimitives = 128, Topology = MeshTopology.Triangle)]
+void VisBufferMesh([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in SceneVisBufferArguments args,
+                   out Vertices<SceneVisVertex, 256> verts, out Indices<uint3, 128> tris,
+                   out Primitives<SceneVisPrimitive, 128> prims)
+{
+    uint firstPhase = args.Count[CountHardwareFirstPhase];
+    uint begin = args.Phase == 0 ? 0 : firstPhase;
+    uint end = args.Phase == 0 ? firstPhase : args.Count[CountHardware];
+    uint listed = begin + group.y * args.GroupsX + group.x;
+    if (listed >= end)
+    {
+        SetMeshOutputCounts(0, 0);
+        return;
+    }
+    uint visibleIndex = args.Listed[listed];
+    SceneVisibleCluster visible = args.Visible[visibleIndex];
+    SceneCluster cluster = args.Clusters[visible.Cluster];
+    SceneInstance instance = args.Instances[visible.Instance];
+    SceneViewData view = args.View[0];
+    SetMeshOutputCounts(cluster.VertexCount, cluster.TriangleCount);
+    for (uint v = thread.x; v < cluster.VertexCount; v += 128)
+    {
+        float3 relative = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, v));
+        SceneVisVertex vertex;
+        vertex.Position = ToClip(view, relative);
+        verts[v] = vertex;
+        ScreenVertices[v] = float3(vertex.Position.x, vertex.Position.y, vertex.Position.w);
+    }
+    Barrier.Group();
+    uint t = thread.x;
+    if (t < cluster.TriangleCount)
+    {
+        uint3 corners = LoadTriangle(args.Geometry, cluster, t);
+        // The homogeneous winding, right whichever side of the camera the corners are on: positive for a front face,
+        // counter-clockwise with y up. A one-sided cluster's back faces become degenerate, which draw nothing.
+        float3 a = ScreenVertices[corners.x];
+        float3 b = ScreenVertices[corners.y];
+        float3 c = ScreenVertices[corners.z];
+        float winding = Dot(a, Cross(b, c));
+        if (!IsTwoSided(cluster) && (winding < 0.0) != IsMirrored(instance))
+        {
+            corners = uint3(0, 0, 0);
+        }
+        tris[t] = corners;
+        prims[t].Payload = (visibleIndex << TriangleBits) | t;
+    }
+}
+
+[Pixel]
+void VisBufferPixel(in SceneVisVertex vertex, [PerPrimitive] in SceneVisPrimitive prim,
+                    [Uniform] in SceneVisBufferArguments args)
+{
+    uint x = (uint)vertex.Position.x;
+    uint y = (uint)vertex.Position.y;
+    SceneViewData view = args.View[0];
+    ulong value = ((ulong)AsUInt(vertex.Position.z) << 32) | (ulong)prim.Payload;
+    WriteVisBuffer(args.VisBuffer, y * view.Width + x, value);
+    if ((args.Flags & RasterOverdraw) != 0)
+    {
+        Atomic.Add(ref args.Overdraw[y * view.Width + x], 1u);
+    }
+}
+
+
+/// Snaps a pixel coordinate to the 1/256 pixel grid the hardware raster uses, so edges agree across triangles.
+float SnapToSubpixel(float value)
+{
+    return Floor(value * 256.0 + 0.5) / 256.0;
+}
+
+/// Edge function of the edge from *a* to *b* at *p*: positive on the inside of a triangle wound as its area is.
+float Edge(float2 a, float2 b, float2 p)
+{
+    return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+}
+
+/// A pixel center on an edge belongs to the triangle that has the edge as a top or left one, so that of the two
+/// triangles sharing it exactly one covers the pixel.
+bool IsTopLeft(float2 a, float2 b)
+{
+    return b.y > a.y || (b.y == a.y && b.x < a.x);
+}
+
+/// Narrows *range*, of pixel center x on the row at *y*, to where Edge(a, b, (x, y)) can be at least zero, widened
+/// by a pixel against rounding: the edge function is linear along the row.
+float2 NarrowToEdge(float2 a, float2 b, float y, float2 range)
+{
+    float slope = a.y - b.y;
+    float atZero = (b.x - a.x) * (y - a.y) + (b.y - a.y) * a.x;
+    if (slope > 0.0)
+    {
+        range.x = Max(range.x, -atZero / slope - 1.0);
+    }
+    else if (slope < 0.0)
+    {
+        range.y = Min(range.y, -atZero / slope + 1.0);
+    }
+    else if (atZero < 0.0)
+    {
+        range.y = range.x - 1.0;
+    }
+    return range;
+}
+
+/// Rasterizes triangle *t* of the software raster's cluster, whose vertices are in ScreenVertices.
+void RasterizeTriangle(SceneVisBufferArguments args, SceneViewData view, SceneInstance instance, SceneCluster cluster,
+                       uint visibleIndex, uint t)
+{
+    uint3 corners = LoadTriangle(args.Geometry, cluster, t);
+    float3 a = ScreenVertices[corners.x];
+    float3 b = ScreenVertices[corners.y];
+    float3 c = ScreenVertices[corners.z];
+    float area = Edge(a.xy, b.xy, c.xy);
+    // Pixels have y down, so a front face, counter-clockwise with y up, has negative area here.
+    if (area == 0.0 || (!IsTwoSided(cluster) && (area > 0.0) != IsMirrored(instance)))
+    {
+        return;
+    }
+    if (area < 0.0)
+    {
+        float3 swap = b;
+        b = c;
+        c = swap;
+        area = -area;
+    }
+    // The first pixel center at or past the low edge: ceil(low - 0.5), as -floor(0.5 - low).
+    int minX = Max(-(int)Floor(0.5 - Min(a.x, Min(b.x, c.x))), 0);
+    int minY = Max(-(int)Floor(0.5 - Min(a.y, Min(b.y, c.y))), 0);
+    int maxX = Min((int)Floor(Max(a.x, Max(b.x, c.x)) - 0.5), (int)view.Width - 1);
+    int maxY = Min((int)Floor(Max(a.y, Max(b.y, c.y)) - 0.5), (int)view.Height - 1);
+    // The software raster takes clusters whose edges are a few dozen pixels at most, so the bound only guards against
+    // a bad triangle hanging the group.
+    if (minX > maxX || minY > maxY || (maxX - minX) * (maxY - minY) > 65536)
+    {
+        return;
+    }
+    bool topLeftA = IsTopLeft(b.xy, c.xy);
+    bool topLeftB = IsTopLeft(c.xy, a.xy);
+    bool topLeftC = IsTopLeft(a.xy, b.xy);
+    float inverseArea = 1.0 / area;
+    ulong payload = (ulong)((visibleIndex << TriangleBits) | t);
+    bool scanline = maxX - minX >= 4;
+    for (int y = minY; y <= maxY; ++y)
+    {
+        int first = minX;
+        int last = maxX;
+        if (scanline)
+        {
+            float py = (float)y + 0.5;
+            float2 range = float2((float)minX + 0.5, (float)maxX + 0.5);
+            range = NarrowToEdge(b.xy, c.xy, py, range);
+            range = NarrowToEdge(c.xy, a.xy, py, range);
+            range = NarrowToEdge(a.xy, b.xy, py, range);
+            first = Max(minX, -(int)Floor(0.5 - range.x));
+            last = Min(maxX, (int)Floor(range.y - 0.5));
+        }
+        for (int x = first; x <= last; ++x)
+        {
+            float2 p = float2((float)x + 0.5, (float)y + 0.5);
+            float wa = Edge(b.xy, c.xy, p);
+            float wb = Edge(c.xy, a.xy, p);
+            float wc = Edge(a.xy, b.xy, p);
+            if ((wa > 0.0 || (wa == 0.0 && topLeftA)) && (wb > 0.0 || (wb == 0.0 && topLeftB)) &&
+                (wc > 0.0 || (wc == 0.0 && topLeftC)))
+            {
+                float depth = (wa * a.z + wb * b.z + wc * c.z) * inverseArea;
+                ulong value = ((ulong)AsUInt(depth) << 32) | payload;
+                WriteVisBuffer(args.VisBuffer, (uint)y * view.Width + (uint)x, value);
+                if ((args.Flags & RasterOverdraw) != 0)
+                {
+                    Atomic.Add(ref args.Overdraw[(uint)y * view.Width + (uint)x], 1u);
+                }
+            }
+        }
+    }
+}
+
+/// The software raster: one group of 64 threads per small visible cluster of the phase, which launches far fewer
+/// waves than a thread per triangle would for these clusters. The threads move the vertices to pixels, then each
+/// rasterizes up to two triangles over the pixel centers of their bounds, the back faces of one-sided clusters
+/// dropped, with the hardware's mapping
+/// of the flipped viewport and depth interpolated in screen space. A triangle wider than four pixels walks each row
+/// only between its edges (as Nanite's scanline path), testing those pixels exactly as the others.
+[Compute(64, 1, 1)]
+void RasterizeSoftware([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in SceneVisBufferArguments args)
+{
+    uint firstPhase = args.Count[CountSoftwareFirstPhase];
+    uint begin = args.Phase == 0 ? 0 : firstPhase;
+    uint end = args.Phase == 0 ? firstPhase : args.Count[CountSoftware];
+    uint listed = begin + group.y * args.GroupsX + group.x;
+    if (listed >= end)
+    {
+        return;
+    }
+    uint visibleIndex = args.Listed[listed];
+    SceneVisibleCluster visible = args.Visible[visibleIndex];
+    SceneCluster cluster = args.Clusters[visible.Cluster];
+    SceneInstance instance = args.Instances[visible.Instance];
+    SceneViewData view = args.View[0];
+    float width = (float)view.Width;
+    float height = (float)view.Height;
+    for (uint v = thread.x; v < cluster.VertexCount; v += 64)
+    {
+        float4 clip = ToClip(view, ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, v)));
+        float inverse = 1.0 / clip.w;
+        ScreenVertices[v] = float3(SnapToSubpixel((clip.x * inverse * 0.5 + 0.5) * width),
+                                   SnapToSubpixel((0.5 - clip.y * inverse * 0.5) * height), clip.z * inverse);
+    }
+    Barrier.Group();
+    for (uint t = thread.x; t < cluster.TriangleCount; t += 64)
+    {
+        RasterizeTriangle(args, view, instance, cluster, visibleIndex, t);
+    }
+}

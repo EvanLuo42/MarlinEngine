@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "fa0674d5-4414-5092-85b3-4d53275f3112"
+    !Name = "square"
+    SourceFile = `source:square.svg#5e53e5db-d597-48d0-802b-b8ed42476483`
+}

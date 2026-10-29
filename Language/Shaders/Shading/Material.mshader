@@ -1,0 +1,86 @@
+/// The material interface (Documentation/Architecture/07 §4.2, MarlinLanguage §9.4): a material is a `[Material]` struct
+/// implementing ISurfaceMaterial, whose public fields are its parameters. Material Resolve evaluates it per pixel in
+/// two-direction forward mode (§9.12), so every input carries its derivatives along screen x and y and a texture
+/// sample sees the derivatives of its UV.
+namespace Marlin.Shading;
+
+/// What a material sees of the point being shaded, in world space relative to the camera.
+public struct SurfaceInputs
+{
+    public float3 Position;
+    /// The interpolated vertex normal, facing the viewer.
+    public float3 WorldNormal;
+    /// The interpolated tangent and the bitangent sign; zero without UVs.
+    public float3 WorldTangent;
+    public float BitangentSign;
+    /// The direction from the point to the camera.
+    public float3 View;
+    public float2 Uv0;
+    public float2 Uv1;
+    public float4 Color;
+}
+
+public interface ISurfaceMaterial
+{
+    [Differentiable] Surface Evaluate(in SurfaceInputs input);
+}
+
+/// The engine textures a texture parameter falls back to.
+public enum DefaultTexture : uint { None, White, Black, FlatNormal }
+
+/// A texture parameter: the texture, its sampler, the engine texture the material converter binds when the material
+/// gives none, and where samples note the resolution they need for streaming (SceneTextureResidency); null for none.
+public struct MaterialTexture2D<T> where T : IScalarOrVector
+{
+    public Texture2D<T> Texture;
+    public Sampler Sampler;
+    public DefaultTexture Default;
+    public Ptr<uint, Access.ReadWrite> Feedback;
+}
+
+/// Texture parameters' defaults.
+public struct DefaultTextures
+{
+    public static readonly MaterialTexture2D<half4> White = new MaterialTexture2D<half4> { Default = DefaultTexture.White };
+    public static readonly MaterialTexture2D<half4> Black = new MaterialTexture2D<half4> { Default = DefaultTexture.Black };
+    public static readonly MaterialTexture2D<half4> FlatNormal =
+        new MaterialTexture2D<half4> { Default = DefaultTexture.FlatNormal };
+}
+
+/// Samples *texture* at *uv* with the mip its screen derivatives pick: Material Resolve differentiates the material
+/// along screen x and y at once, and this derivative sees both. Outside a derivative it samples mip 0. The sampled
+/// value's own derivative is zero.
+[ForwardDerivative2(nameof(SampleMaterialTexture2))]
+public half4 SampleMaterialTexture(Texture2D<half4> texture, Sampler sampler, Ptr<uint, Access.ReadWrite> feedback,
+                                   float2 uv)
+    => texture.SampleLevel(sampler, uv, 0);
+
+public DifferentialPair2<half4> SampleMaterialTexture2(Texture2D<half4> texture, Sampler sampler,
+                                                      Ptr<uint, Access.ReadWrite> feedback,
+                                                      DifferentialPair2<float2> uv)
+{
+    if (!feedback.IsNull)
+    {
+        // The texels across the UV range the sample needs, as the sampler picks its mip with 16x anisotropy: log2
+        // of it plus one, the most of any sample this frame. Read first, so that most samples need no atomic.
+        float lx = Length(uv.Dx);
+        float ly = Length(uv.Dy);
+        float major = Max(lx, ly);
+        float minor = Max(Min(lx, ly), 1e-12);
+        float footprint = Max(major / Min(major / minor, 16.0), 1e-9);
+        uint needed = (uint)Clamp(-Floor(Log2(footprint)), 0.0, 15.0) + 1;
+        if (feedback[0] < needed)
+        {
+            Atomic.Max(ref feedback[0], needed);
+        }
+    }
+    half4 value = texture.SampleGrad(sampler, uv.Primal, uv.Dx, uv.Dy);
+    half4 zero = half4(0.0h, 0.0h, 0.0h, 0.0h);
+    return new DifferentialPair2<half4>(value, zero, zero);
+}
+
+public extension MaterialTexture2D<half4>
+{
+    [Differentiable]
+    public half4 Sample(float2 uv) => SampleMaterialTexture(this.Texture, this.Sampler, this.Feedback, uv);
+}

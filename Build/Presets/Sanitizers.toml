@@ -1,0 +1,10 @@
+# AddressSanitizer and UndefinedBehaviorSanitizer, both clang's own, in Debug and Development.
+#   marlin generate --preset Sanitizers
+# The binaries replace the unsanitized ones in Binaries/<Platform>/<Arch>/<Config>/; generate without the
+# preset to go back. MarlinHeap hands allocations to the C runtime heap, which ASan watches.
+
+[configurations.Debug]
+sanitizers = ["address", "undefined"]
+
+[configurations.Development]
+sanitizers = ["address", "undefined"]

@@ -1,0 +1,155 @@
+/// Growable arrays (MarlinScript §10.1).
+namespace Marlin.Collections;
+
+/// A growable array: amortized O(1) Add at the end, O(1) indexing. Indices outside `0..Count` fault.
+public sealed class List<T>
+{
+    internal T[] _items;
+    internal int _count;
+
+    public List()
+    {
+        _items = new T[0];
+    }
+
+    public List(int capacity)
+    {
+        _items = new T[capacity];
+    }
+
+    public int Count => _count;
+
+    public int Capacity => _items.Length;
+
+    public T this[int index]
+    {
+        get
+        {
+            CheckIndex(index);
+            return _items[index];
+        }
+        set
+        {
+            CheckIndex(index);
+            _items[index] = value;
+        }
+    }
+
+    public void Add(T item)
+    {
+        if (_count == _items.Length)
+        {
+            Grow(_count + 1);
+        }
+        _items[_count] = item;
+        _count += 1;
+    }
+
+    public void Insert(int index, T item)
+    {
+        if (index < 0 || index > _count)
+        {
+            Panic($"index {index} is outside 0..{_count}");
+        }
+        if (_count == _items.Length)
+        {
+            Grow(_count + 1);
+        }
+        _items.CopyTo(index, _items, index + 1, _count - index);
+        _items[index] = item;
+        _count += 1;
+    }
+
+    public void RemoveAt(int index)
+    {
+        CheckIndex(index);
+        _count -= 1;
+        _items.CopyTo(index + 1, _items, index, _count - index);
+        _items.Clear(_count, 1);
+    }
+
+    /// Removes the item at *index* by moving the last item into its place: O(1), but changes the order.
+    public void RemoveAtSwapBack(int index)
+    {
+        CheckIndex(index);
+        _count -= 1;
+        _items[index] = _items[_count];
+        _items.Clear(_count, 1);
+    }
+
+    public void Clear()
+    {
+        _items.Clear(0, _count);
+        _count = 0;
+    }
+
+    public void Reserve(int capacity)
+    {
+        if (capacity > _items.Length)
+        {
+            Grow(capacity);
+        }
+    }
+
+    public T[] ToArray()
+    {
+        var result = new T[_count];
+        _items.CopyTo(0, result, 0, _count);
+        return result;
+    }
+
+    /// Sorts the items stably in ascending `CompareTo` order.
+    public void Sort()
+    {
+        SortRange(_items, 0, _count, (a, b) => a.CompareTo(b));
+    }
+
+    /// Sorts the items stably by *comparison*, negative when its first argument sorts before its second.
+    public void Sort(Func<T, T, int> comparison)
+    {
+        SortRange(_items, 0, _count, comparison);
+    }
+
+    public ListEnumerator<T> GetEnumerator() => new ListEnumerator<T>(this);
+
+    private void CheckIndex(int index)
+    {
+        if ((uint)index >= (uint)_count)
+        {
+            Panic($"index {index} is outside 0..{_count}");
+        }
+    }
+
+    private void Grow(int needed)
+    {
+        int capacity = _items.Length < 4 ? 4 : _items.Length * 2;
+        if (capacity < needed)
+        {
+            capacity = needed;
+        }
+        var items = new T[capacity];
+        _items.CopyTo(0, items, 0, _count);
+        _items = items;
+    }
+}
+
+/// Walks a List<T> in order without allocating.
+public struct ListEnumerator<T>
+{
+    private List<T> _list;
+    private int _index;
+
+    public ListEnumerator(List<T> list)
+    {
+        _list = list;
+        _index = -1;
+    }
+
+    public bool MoveNext()
+    {
+        _index += 1;
+        return _index < _list._count;
+    }
+
+    public T Current => _list._items[_index];
+}

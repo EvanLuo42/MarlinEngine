@@ -1,0 +1,179 @@
+/// The GPU Scene updates, and the visible cluster list of a view with the arguments of the visibility raster that draws
+/// it (Documentation/Architecture/07 §5.3). Culling runs in two phases: the first (CullGroups in SceneLod.mshader)
+/// tests against the HZB of the last frame and keeps what that hides as candidates; once the first raster has made
+/// this frame's HZB, the second tests the candidates against it. Both phases append to one list, so a visible
+/// cluster's index names it in the visibility buffer either way, and list the index for the raster that draws it:
+/// the hardware raster for clusters large on screen, the software raster for small ones.
+namespace Marlin.Passes.Scene;
+
+public struct SceneInstanceUpdate
+{
+    public uint Slot;
+    public uint Pad0;
+    public uint Pad1;
+    public uint Pad2;
+    public SceneInstance Instance;
+}
+
+public struct SceneScatterArguments
+{
+    public Span<SceneInstanceUpdate> Updates;
+    public Span<SceneInstance, Access.ReadWrite> Instances;
+    public uint UpdateCount;
+}
+
+/// Writes the instances that changed this frame into their slots of the persistent instance buffer.
+[Compute(64, 1, 1)]
+void ScatterInstances([DispatchThreadId] uint3 id, [Uniform] in SceneScatterArguments args)
+{
+    if (id.x >= args.UpdateCount)
+    {
+        return;
+    }
+    SceneInstanceUpdate update = args.Updates[id.x];
+    args.Instances[update.Slot] = update.Instance;
+}
+
+/// The words of a view's cluster counts: visible clusters, candidates, those of the visible listed for each raster,
+/// and those after the first phase, which the second phase's appear after.
+const uint CountVisible = 0;
+const uint CountCandidates = 1;
+const uint CountHardware = 2;
+const uint CountSoftware = 3;
+const uint CountHardwareFirstPhase = 4;
+const uint CountSoftwareFirstPhase = 5;
+
+/// Whether the cluster with view-space sphere *s* and longest triangle edge *edge* (scaled to the view) goes to the
+/// software raster: wholly beyond the near plane, which the software raster does not clip against, and with that edge
+/// shorter than *pixels* on screen at the sphere's nearest point, where its triangles are largest. Zero *pixels* sends
+/// none.
+bool IsSoftwareRaster(SceneViewData view, float4 s, float edge, float pixels)
+{
+    float nearest = s.z - s.w;
+    return nearest > view.Forward.w && edge * view.Up.w * 0.5 * (float)view.Height < pixels * nearest;
+}
+
+/// Appends a visible cluster, and lists its index for the raster *software* names; a full list drops it.
+void AppendVisible(Span<SceneVisibleCluster, Access.ReadWrite> list, Span<uint, Access.ReadWrite> hardware,
+                   Span<uint, Access.ReadWrite> software, Span<uint, Access.ReadWrite> counts, uint limit,
+                   uint instance, uint cluster, bool isSoftware)
+{
+    uint slot = Atomic.Add(ref counts[CountVisible], 1u);
+    if (slot >= limit)
+    {
+        return;
+    }
+    SceneVisibleCluster entry;
+    entry.Instance = instance;
+    entry.Cluster = cluster;
+    list[slot] = entry;
+    if (isSoftware)
+    {
+        software[Atomic.Add(ref counts[CountSoftware], 1u)] = slot;
+    }
+    else
+    {
+        hardware[Atomic.Add(ref counts[CountHardware], 1u)] = slot;
+    }
+}
+
+/// Culling flags.
+const uint CullHzb = 1;
+
+void Append(Span<SceneVisibleCluster, Access.ReadWrite> list, Span<uint, Access.ReadWrite> counts, uint counter,
+            uint limit, uint instance, uint cluster)
+{
+    uint slot = Atomic.Add(ref counts[counter], 1u);
+    if (slot < limit)
+    {
+        SceneVisibleCluster entry;
+        entry.Instance = instance;
+        entry.Cluster = cluster;
+        list[slot] = entry;
+    }
+}
+
+public struct SceneCandidateArguments
+{
+    public Span<SceneInstance> Instances;
+    public Span<SceneCluster> Clusters;
+    public Span<SceneViewData> Views;
+    /// This frame's HZB, of the first phase's raster.
+    public Texture2D<float> Hzb;
+    public Span<SceneVisibleCluster> Candidates;
+    public Span<SceneVisibleCluster, Access.ReadWrite> Visible;
+    public Span<uint, Access.ReadWrite> Hardware;
+    public Span<uint, Access.ReadWrite> Software;
+    public Span<uint, Access.ReadWrite> Counts;
+    public uint HzbMips;
+    public uint MaxVisible;
+    /// Clusters whose triangle edges are shorter than this many pixels on screen go to the software raster.
+    public float SoftwarePixels;
+}
+
+/// The second phase: one thread per candidate, against this frame's HZB; what it no longer hides is appended.
+[Compute(64, 1, 1)]
+void CullCandidates([DispatchThreadId] uint3 id, [Uniform] in SceneCandidateArguments args)
+{
+    if (id.x >= Min(args.Counts[CountCandidates], args.MaxVisible))
+    {
+        return;
+    }
+    SceneVisibleCluster candidate = args.Candidates[id.x];
+    SceneInstance instance = args.Instances[candidate.Instance];
+    SceneCluster cluster = args.Clusters[candidate.Cluster];
+    SceneViewData view = args.Views[0];
+    float4 sphere = ToViewSphere(instance, view, cluster.Sphere);
+    if (!IsOccluded(args.Hzb, args.HzbMips, view, sphere))
+    {
+        AppendVisible(args.Visible, args.Hardware, args.Software, args.Counts, args.MaxVisible, candidate.Instance,
+                      candidate.Cluster,
+                      IsSoftwareRaster(view, sphere, cluster.MaxEdgeLength * MaxScale(instance), args.SoftwarePixels));
+    }
+}
+
+public struct SceneRasterArguments
+{
+    public Span<uint, Access.ReadWrite> Counts;
+    /// Three uint: the mesh groups of the visibility raster, one per cluster of the phase it draws.
+    public Span<uint, Access.ReadWrite> Arguments;
+    /// Three uint: the groups of the software raster, one per cluster of the phase it draws.
+    public Span<uint, Access.ReadWrite> SoftwareArguments;
+    /// Three uint: the groups of the second phase's culling, one per 64 candidates. Written by the first phase.
+    public Span<uint, Access.ReadWrite> CandidateArguments;
+    public uint MaxVisible;
+    public uint GroupsX;
+    public uint Phase;
+}
+
+/// Three uint of *count* groups, rows of *groupsX*.
+void WriteGroups(Span<uint, Access.ReadWrite> arguments, uint count, uint groupsX)
+{
+    uint x = Min(count, groupsX);
+    arguments[0] = x;
+    arguments[1] = x == 0 ? 0 : (count + groupsX - 1) / groupsX;
+    arguments[2] = 1;
+}
+
+[Compute(1, 1, 1)]
+void BuildRasterArguments([Uniform] in SceneRasterArguments args)
+{
+    uint hardware = args.Counts[CountHardware];
+    uint software = args.Counts[CountSoftware];
+    if (args.Phase == 0)
+    {
+        args.Counts[CountHardwareFirstPhase] = hardware;
+        args.Counts[CountSoftwareFirstPhase] = software;
+        uint candidates = Min(args.Counts[CountCandidates], args.MaxVisible);
+        args.CandidateArguments[0] = (candidates + 63) / 64;
+        args.CandidateArguments[1] = 1;
+        args.CandidateArguments[2] = 1;
+    }
+    else
+    {
+        hardware -= args.Counts[CountHardwareFirstPhase];
+        software -= args.Counts[CountSoftwareFirstPhase];
+    }
+    WriteGroups(args.Arguments, hardware, args.GroupsX);
+    WriteGroups(args.SoftwareArguments, software, args.GroupsX);
+}

@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "0a22c900-f3ba-5f52-9e7c-16547efe36f4"
+    !Name = "trash-2"
+    SourceFile = `source:trash-2.svg#e31f4562-9509-4a2a-ad62-b61497d21f28`
+}

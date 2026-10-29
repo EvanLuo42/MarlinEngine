@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "7cf28371-09ff-4c89-9a4e-e23387f7202e"
+    !Name = "JetBrainsMono-Regular"
+    SourceFile = `source:JetBrainsMono-Regular.ttf#9eeca9fb-1c4c-48e7-9c2a-cd8b1f1b24f8`
+    FaceIndex = 0
+}

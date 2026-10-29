@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "02b229e2-c070-5a59-9381-9c42d1e61e1b"
+    !Name = "package"
+    SourceFile = `source:package.svg#859fe7c6-eae0-4369-a6f3-6017b26f0914`
+}

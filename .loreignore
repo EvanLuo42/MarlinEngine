@@ -1,0 +1,66 @@
+# Visual Studio solution and project files
+*.sln
+*.slnx
+*.gta.runsettings
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+# build logs VS writes next to each project, and the Test Explorer results
+*.log
+XMLGoogleTestResults.xml
+.vs/
+
+# Other IDE / editor files
+*.code-workspace
+.vscode/
+.cache/
+.idea/
+*.xcodeproj
+*.xcworkspace
+compile_commands.json
+
+# Compiler intermediates and debug symbols
+# (.exe/.dll/.lib are not listed: prebuilt tools and third-party libs are versioned,
+# e.g. Extras/FASTBuild/FBuild.exe; our own build output lands in Binaries/ anyway)
+*.obj
+*.o
+*.pch
+*.ipch
+*.pdb
+*.ilk
+*.exp
+
+# ...except in versioned prebuilt tools and third-party libraries, which may ship
+# .pdb/.exp/.obj next to their binaries. Lore follows gitignore: `!` re-includes, the last
+# matching rule wins, and a rooted `!/dir/` re-includes the whole subtree. Re-inclusions must
+# be rooted (`!**/ThirdParty/` is rejected). The Python and OS rules below still apply in here.
+!/Extras/
+!/Source/ThirdParty/
+
+# Build products and intermediate artifacts
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# The Zorah sample's content: a 10 GB glTF and what is imported and generated from it, made on each machine
+/Samples/Zorah/Content/
+
+# Local build settings (per-machine overrides)
+Build/BuildSettings.local.toml
+
+# Python
+.venv/
+.ruff_cache/
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

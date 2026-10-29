@@ -1,0 +1,48 @@
+/// Tests of Marlin.Random (MarlinScript §10.1).
+namespace Marlin.Tests;
+
+[Test]
+void SeededRandomRepeats()
+{
+    var a = new Random(12345ul);
+    var b = new Random(12345ul);
+    for (int i = 0; i < 100; i++)
+    {
+        Assert.True(a.NextULong() == b.NextULong());
+    }
+    Assert.True(new Random(1ul).NextULong() != new Random(2ul).NextULong());
+    Assert.True(new Random().NextULong() != new Random().NextULong());
+}
+
+[Test]
+void RandomStaysInRange()
+{
+    var random = new Random(7ul);
+    var counts = new int[6];
+    for (int i = 0; i < 6000; i++)
+    {
+        int roll = random.Range(1, 7);
+        Assert.True(roll >= 1 && roll <= 6);
+        counts[roll - 1] += 1;
+        float f = random.NextFloat();
+        Assert.True(f >= 0.0f && f < 1.0f);
+        double d = random.Range(-2.0f, 3.0f);
+        Assert.True(d >= -2.0 && d < 3.0);
+    }
+    for (int i = 0; i < 6; i++)
+    {
+        Assert.True(counts[i] > 850 && counts[i] < 1150);
+    }
+    float3 direction = random.OnUnitSphere();
+    Assert.True(Abs(Length(direction) - 1.0f) < 0.0001f);
+    Assert.True(Length(random.InsideUnitCircle()) <= 1.0f);
+    var deck = new int[] { 0, 1, 2, 3, 4, 5, 6, 7 };
+    random.Shuffle(deck);
+    int sum = 0;
+    foreach (int card in deck)
+    {
+        sum += card;
+    }
+    Assert.Equal(28, sum);
+    Assert.True(Random.Shared.Next(10) < 10);
+}

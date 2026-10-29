@@ -1,0 +1,10 @@
+Family: Lucide
+Version: 1.56.0 (npm lucide-static@1.56.0)
+Release: https://www.npmjs.com/package/lucide-static/v/1.56.0
+Archive: https://registry.npmjs.org/lucide-static/-/lucide-static-1.56.0.tgz
+Archive SHA-256: 176ce6fb71be02910852cc5e243cac2399e85c13465ae1e742cb7a534eacb44a
+Files: icons/{audio-waveform,box,bug,chevron-down,chevron-left,chevron-right,circle-dot,copy,download,
+       external-link,file,folder,folder-open,folder-plus,git-branch,history,image,layout-grid,list,map,minus,
+       mountain,music,package,pencil,person-standing,plus,refresh-cw,save-all,scan-search,search,settings,shapes,
+       shield-check,sliders-vertical,sparkles,square,star,trash-2,type,x}.svg, LICENSE (as LICENSE.txt)
+License: ISC (icons derived from Feather: MIT)

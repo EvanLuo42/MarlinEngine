@@ -1,0 +1,7 @@
+!Version "1.0"
+
+// What the Zorah sample opens when it runs as a game: every mesh of the scene where the glTF places it.
+Product
+{
+    StartupLevel = </Project/Content/Levels/Zorah:Zorah#2f6c3e1a-8d4b-4c7e-9a15-0b7d3e5f9c21>
+}

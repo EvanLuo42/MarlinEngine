@@ -1,0 +1,33 @@
+/// The first post process (Documentation/Architecture/07 §3): exposure, then a filmic curve into the display-referred
+/// UI range the frame's image slots are composited in (07 §5.5).
+namespace Marlin.Passes.Post;
+
+public struct TonemapArguments
+{
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f> Radiance;
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f> Output;
+    public uint Width;
+    public uint Height;
+    /// What radiance is multiplied by: 1 / (1.2 · 2^EV100), the camera's exposure.
+    public float Exposure;
+}
+
+/// Narkowicz's fit of the ACES filmic curve.
+float3 FilmicCurve(float3 x)
+{
+    float3 numerator = x * (2.51 * x + float3(0.03, 0.03, 0.03));
+    float3 denominator = x * (2.43 * x + float3(0.59, 0.59, 0.59)) + float3(0.14, 0.14, 0.14);
+    return Saturate(numerator / denominator);
+}
+
+[Compute(8, 8, 1)]
+void Tonemap([DispatchThreadId] uint3 id, [Uniform] in TonemapArguments args)
+{
+    if (id.x >= args.Width || id.y >= args.Height)
+    {
+        return;
+    }
+    int2 at = int2((int)id.x, (int)id.y);
+    float3 color = FilmicCurve(args.Radiance.Load(at).xyz * args.Exposure);
+    args.Output.Store(at, float4(color, 1));
+}

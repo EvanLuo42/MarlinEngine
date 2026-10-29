@@ -1,0 +1,137 @@
+/// Pseudo-random numbers (MarlinScript §10.1).
+namespace Marlin;
+
+/// A xoshiro256** generator: fast, with a period of 2^256 - 1. Generators made with the same seed give the same
+/// numbers on every platform; `new Random()` seeds itself from the clock. Not for cryptography.
+public sealed class Random
+{
+    private ulong _s0;
+    private ulong _s1;
+    private ulong _s2;
+    private ulong _s3;
+
+    /// A generator shared by the domain, seeded from the clock.
+    public static Random Shared = new Random();
+
+    public Random() : this(Entropy())
+    {
+    }
+
+    public Random(ulong seed)
+    {
+        _s0 = SplitMix(ref seed);
+        _s1 = SplitMix(ref seed);
+        _s2 = SplitMix(ref seed);
+        _s3 = SplitMix(ref seed);
+    }
+
+    /// 64 uniformly distributed bits.
+    public ulong NextULong()
+    {
+        ulong result = Rotate(_s1 * 5ul, 7) * 9ul;
+        ulong t = _s1 << 17;
+        _s2 ^= _s0;
+        _s3 ^= _s1;
+        _s1 ^= _s2;
+        _s0 ^= _s3;
+        _s2 ^= t;
+        _s3 = Rotate(_s3, 45);
+        return result;
+    }
+
+    /// 32 uniformly distributed bits.
+    public uint NextUInt() => (uint)(NextULong() >> 32);
+
+    /// An integer in `0..maxExclusive`, which must be positive; every value is equally likely.
+    public int Next(int maxExclusive)
+    {
+        if (maxExclusive <= 0)
+        {
+            Panic($"the bound {maxExclusive} is not positive");
+        }
+        return (int)Below((uint)maxExclusive);
+    }
+
+    /// An integer in `min..maxExclusive`; every value is equally likely.
+    public int Range(int min, int maxExclusive)
+    {
+        if (maxExclusive <= min)
+        {
+            Panic($"the range {min}..{maxExclusive} is empty");
+        }
+        return min + (int)Below((uint)(maxExclusive - min));
+    }
+
+    /// A float in [0, 1), with all 24 bits of precision.
+    public float NextFloat() => (float)(NextULong() >> 40) * (1.0f / 16777216.0f);
+
+    /// A double in [0, 1), with all 53 bits of precision.
+    public double NextDouble() => (double)(NextULong() >> 11) * (1.0 / 9007199254740992.0);
+
+    /// A float in [min, max).
+    public float Range(float min, float max) => min + (max - min) * NextFloat();
+
+    public bool NextBool() => (NextULong() >> 63) != 0ul;
+
+    /// A point uniformly distributed inside the unit circle.
+    public float2 InsideUnitCircle()
+    {
+        float angle = NextFloat() * 6.28318530718f;
+        float radius = Sqrt(NextFloat());
+        return float2(Cos(angle), Sin(angle)) * radius;
+    }
+
+    /// A direction uniformly distributed over the unit sphere.
+    public float3 OnUnitSphere()
+    {
+        float z = NextFloat() * 2.0f - 1.0f;
+        float angle = NextFloat() * 6.28318530718f;
+        float r = Sqrt(Max(0.0f, 1.0f - z * z));
+        return float3(r * Cos(angle), r * Sin(angle), z);
+    }
+
+    /// A point uniformly distributed inside the unit sphere.
+    public float3 InsideUnitSphere() => OnUnitSphere() * Pow(NextFloat(), 1.0f / 3.0f);
+
+    /// Puts *items* in a uniformly random order (Fisher-Yates).
+    public void Shuffle<T>(T[] items)
+    {
+        for (int i = items.Length - 1; i > 0; i--)
+        {
+            int j = (int)Below((uint)(i + 1));
+            T swap = items[i];
+            items[i] = items[j];
+            items[j] = swap;
+        }
+    }
+
+    /// Lemire's nearly divisionless bounded integer: uniform in `0..bound`.
+    private uint Below(uint bound)
+    {
+        ulong product = (ulong)NextUInt() * bound;
+        uint low = (uint)product;
+        if (low < bound)
+        {
+            uint threshold = (0u - bound) % bound;
+            while (low < threshold)
+            {
+                product = (ulong)NextUInt() * bound;
+                low = (uint)product;
+            }
+        }
+        return (uint)(product >> 32);
+    }
+
+    private static ulong Rotate(ulong value, int bits) => (value << bits) | (value >> (64 - bits));
+
+    private static ulong SplitMix(ref ulong state)
+    {
+        state += 0x9E3779B97F4A7C15ul;
+        ulong z = state;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ul;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBul;
+        return z ^ (z >> 31);
+    }
+
+    [Native("Random.Entropy")] private static ulong Entropy();
+}

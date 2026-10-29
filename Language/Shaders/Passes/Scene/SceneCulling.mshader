@@ -1,0 +1,90 @@
+/// The culling tests of the scene passes (Documentation/Architecture/07 §5.3): frustum, backface cone and occlusion
+/// against a hierarchical depth buffer (HZB), in a view's space. Depth is reversed with an infinite far plane, so the
+/// HZB keeps the smallest (farthest) depth under each texel and an empty pixel is zero.
+namespace Marlin.Passes.Scene;
+
+/// A mesh-space sphere of *instance* in the view space of *view*: x right, y up, z the distance along the view
+/// direction; w the radius.
+float4 ToViewSphere(SceneInstance instance, SceneViewData view, float4 sphere)
+{
+    float3 relative = ToCameraRelative(instance, view, sphere.xyz);
+    float scale = Max(Abs(instance.ScaleX), Max(Abs(instance.ScaleY), Abs(instance.ScaleZ)));
+    return float4(Dot(relative, view.Right.xyz), Dot(relative, view.Up.xyz), Dot(relative, view.Forward.xyz),
+                  sphere.w * scale);
+}
+
+/// True if the view-space sphere *s* is wholly outside the side planes or in front of the near plane.
+bool IsOutsideFrustum(SceneViewData view, float4 s)
+{
+    if (s.z + s.w < view.Forward.w)
+    {
+        return true;
+    }
+    // The side planes are x * scale = ±z; the distance from one is (±x * scale - z) / Sqrt(scale² + 1).
+    float sx = view.Right.w;
+    float sy = view.Up.w;
+    float nx = 1 / Sqrt(sx * sx + 1);
+    float ny = 1 / Sqrt(sy * sy + 1);
+    return (s.x * sx - s.z) * nx > s.w || (-s.x * sx - s.z) * nx > s.w || (s.y * sy - s.z) * ny > s.w ||
+           (-s.y * sy - s.z) * ny > s.w;
+}
+
+/// True if every triangle of *cluster* faces away from the camera (meshoptimizer's cone test with the bounding
+/// sphere). Mirroring and non-uniform scale bend the cone, so such instances never cull this way, nor do two-sided
+/// clusters, whose back faces show.
+bool IsBackfacing(SceneInstance instance, SceneViewData view, SceneCluster cluster)
+{
+    if (cluster.Cone.w >= 1 || IsTwoSided(cluster) || instance.ScaleX <= 0 || instance.ScaleX != instance.ScaleY ||
+        instance.ScaleX != instance.ScaleZ)
+    {
+        return false;
+    }
+    float3 center = ToCameraRelative(instance, view, cluster.Sphere.xyz);
+    float3 axis = RotateByQuaternion(instance.Rotation, cluster.Cone.xyz);
+    return Dot(center, axis) >= cluster.Cone.w * Length(center) + cluster.Sphere.w * instance.ScaleX;
+}
+
+/// True if the view-space sphere *s* lies behind what *hzb* holds. Mip 0 of the HZB is half the view's size rounded up
+/// to a power of two, each texel the farthest depth of the 2×2 pixels under it; *mips* is its mip count.
+bool IsOccluded(Texture2D<float> hzb, uint mips, SceneViewData view, float4 s)
+{
+    float zNear = s.z - s.w;
+    if (zNear <= view.Forward.w)
+    {
+        return false;
+    }
+    float zFar = s.z + s.w;
+    // A conservative screen rectangle: the projection of the sphere's box, each edge at its widest depth.
+    float sx = view.Right.w;
+    float sy = view.Up.w;
+    float minX = (s.x - s.w) * sx;
+    float maxX = (s.x + s.w) * sx;
+    float minY = (s.y - s.w) * sy;
+    float maxY = (s.y + s.w) * sy;
+    minX = minX < 0 ? minX / zNear : minX / zFar;
+    maxX = maxX > 0 ? maxX / zNear : maxX / zFar;
+    minY = minY < 0 ? minY / zNear : minY / zFar;
+    maxY = maxY > 0 ? maxY / zNear : maxY / zFar;
+    float width = (float)view.Width;
+    float height = (float)view.Height;
+    // Normalized device coordinates have y up; pixels have y down.
+    float2 low = float2(Clamp((minX * 0.5 + 0.5) * width, 0, width), Clamp((0.5 - maxY * 0.5) * height, 0, height));
+    float2 high = float2(Clamp((maxX * 0.5 + 0.5) * width, 0, width), Clamp((0.5 - minY * 0.5) * height, 0, height));
+    // The mip whose texels (2^(mip+1) pixels wide) are at least as large as the rectangle: it spans at most 2×2.
+    float extent = Max(Max(high.x - low.x, high.y - low.y) * 0.5, 1);
+    uint mip = Min((uint)Ceiling(Log2(extent)), mips - 1);
+    float scale = 1 / (float)(2u << mip);
+    int2 first = int2((int)Floor(low.x * scale), (int)Floor(low.y * scale));
+    int2 last = int2((int)Floor(high.x * scale), (int)Floor(high.y * scale));
+    uint2 size = hzb.GetSize(mip);
+    float farthest = 1;
+    for (int y = first.y; y <= Min(last.y, first.y + 1); ++y)
+    {
+        for (int x = first.x; x <= Min(last.x, first.x + 1); ++x)
+        {
+            bool inside = x < (int)size.x && y < (int)size.y;
+            farthest = Min(farthest, inside ? hzb.Load(int2(x, y), (int)mip) : 0);
+        }
+    }
+    return view.Forward.w / zNear < farthest;
+}

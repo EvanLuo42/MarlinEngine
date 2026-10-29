@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "7cb5a82c-bb01-530f-8bbc-2f6ebaedb958"
+    !Name = "folder-open"
+    SourceFile = `source:folder-open.svg#ccbff420-3d4b-4c05-9341-652a1f918bc1`
+}

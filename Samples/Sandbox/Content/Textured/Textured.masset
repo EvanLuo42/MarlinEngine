@@ -1,0 +1,44 @@
+!Version "1.0"
+
+TextureSource
+{
+    !UUID = "a4d6c1e8-2b7f-4c93-8e15-6f0a3b9d2c71"
+    !Name = "Tiles"
+    Compression = "Color"
+    ColorSpace = Srgb
+    SourceFile = `source:Tiles.png#3c1f7a52-9d84-4e6b-a1c3-5b2e8f0d6a17`
+}
+
+Material
+{
+    !UUID = "e8b0a5c2-6fb3-40d7-8259-ad4e7f3b6ab5"
+    !Name = "TiledStone"
+    Shader = </Project/Language/Shaders/Materials/Tiled:Sandbox.Materials.Tiled#f9c1b6d3-70c4-41e8-936a-be5f8a4c7bc6>
+    BaseColor = <#a4d6c1e8-2b7f-4c93-8e15-6f0a3b9d2c71>
+    Tiling = 4
+}
+
+MeshSource
+{
+    !UUID = "b5e7d2f9-3c80-4da4-9f26-7a1b4c0e3d82"
+    !Name = "Textured_Floor"
+    SourceFile = `source:Textured.gltf#6e9b2d41-7c35-4f8a-b0e6-2a1d9c4f8b53`
+    Mesh = "Floor"
+    Slots = { Default = <#e8b0a5c2-6fb3-40d7-8259-ad4e7f3b6ab5> }
+}
+
+MeshSource
+{
+    !UUID = "c6f8e3a0-4d91-4eb5-a037-8b2c5d1f4e93"
+    !Name = "Textured_Crate"
+    SourceFile = `source:Textured.gltf#6e9b2d41-7c35-4f8a-b0e6-2a1d9c4f8b53`
+    Mesh = "Crate"
+    Slots = { Default = <#e8b0a5c2-6fb3-40d7-8259-ad4e7f3b6ab5> }
+}
+
+MeshImportOptions
+{
+    !UUID = "d7a9f4b1-5ea2-4fc6-b148-9c3d6e2a5fa4"
+    !Name = "Textured_ImportOptions"
+    Combine = false
+}

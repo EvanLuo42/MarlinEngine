@@ -1,0 +1,40 @@
+/// One direction of the separable Gaussian blur behind UIPainter layers (Documentation/Architecture/09 §2): a
+/// layer's content (Blur) or what lies behind it (BackdropBlur). Premultiplied colors blur without fringes.
+namespace Marlin.Passes.Ui;
+
+public struct UiBlurArguments
+{
+    public Texture2D<float4> Source;
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f> Target;
+    public uint Horizontal;
+    /// Target pixel (x, y) reads source pixel (x + OffsetX, y + OffsetY).
+    public int OffsetX;
+    public int OffsetY;
+    /// Standard deviation in pixels; the kernel reaches three of them.
+    public float Sigma;
+}
+
+[Compute(8, 8, 1)]
+void Blur([DispatchThreadId] uint3 id, [Uniform] in UiBlurArguments args)
+{
+    uint2 size = args.Target.Size;
+    if (id.x >= size.x || id.y >= size.y)
+    {
+        return;
+    }
+    uint2 sourceSize = args.Source.Size;
+    int2 center = int2(id.xy) + int2(args.OffsetX, args.OffsetY);
+    int2 step = args.Horizontal != 0 ? int2(1, 0) : int2(0, 1);
+    int radius = (int)Min(Ceiling(args.Sigma * 3.0), 64.0);
+    float inverse = -0.5 / Max(args.Sigma * args.Sigma, 1e-6);
+    float4 sum = float4(0, 0, 0, 0);
+    float total = 0;
+    for (int k = -radius; k <= radius; k++)
+    {
+        int2 p = Clamp(center + step * k, int2(0, 0), int2(sourceSize) - int2(1, 1));
+        float weight = Exp((float)(k * k) * inverse);
+        sum += args.Source.Load(p, 0) * weight;
+        total += weight;
+    }
+    args.Target.Store(int2(id.xy), sum / total);
+}

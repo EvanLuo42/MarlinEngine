@@ -1,0 +1,459 @@
+/// Cluster LOD selection and page streaming requests (Documentation/Architecture/07 §5.3). Each instance seeds a queue
+/// with the roots of its mesh's per-depth trees; a persistent kernel walks the trees through that queue, descending
+/// while a node's error is too large on screen, and lists the groups at the leaves whose pages are resident and asks
+/// for the others; then one group per workgroup tests its clusters and feeds the two-phase culling of
+/// SceneClusters.mshader. The traversal runs in the same two phases: the first sets aside the nodes the last frame's
+/// HZB hides, without descending into them or asking for their pages, and the second, once the first raster has made
+/// this frame's HZB, traverses those it no longer hides.
+namespace Marlin.Passes.Scene;
+
+/// The words of a view's traversal state.
+const uint StateWrite = 0;
+const uint StateRead = 1;
+const uint StatePending = 2;
+const uint StateOverflow = 3;
+const uint StateGroups = 4;
+const uint StateGroupOverflow = 5;
+/// The nodes the first phase set aside, the visible groups the first phase listed, and where in the queue the second
+/// phase's entries start.
+const uint StateOccluded = 6;
+const uint StateFirstGroups = 7;
+const uint StateSeedFirst = 8;
+
+/// A queue entry not written yet: the queue is cleared to this every frame.
+const ulong EmptyItem = 0xFFFFFFFFFFFFFFFFul;
+/// A thread that holds no queue entry.
+const uint NoIndex = 0xFFFFFFFFu;
+/// Iterations after which a traversal thread gives up, so that a bug cannot hang the GPU: far more queue entries
+/// than one thread takes, and short of the driver's timeout.
+const uint MaxTraversalIterations = 65536;
+
+/// The words before the entries of the page request list: count, requests dropped, the longest traversal queue of
+/// the frame's views, and the TraversalQueueFull, TraversalGroupsFull and TraversalUnfinished flags of any of them.
+const uint RequestHeaderWords = 4;
+/// The words of a request: the page in the page table, and the error on screen in pixels of the group that asked
+/// for it, as float bits, by which the CPU loads the pages that sharpen the picture most first.
+const uint RequestWords = 2;
+const uint RequestQueuePeak = 2;
+const uint RequestTraversalFlags = 3;
+const uint TraversalQueueFull = 1;
+const uint TraversalGroupsFull = 2;
+const uint TraversalUnfinished = 4;
+
+/// The error of *sphere* (a view-space sphere, ToViewSphere) on screen in pixels: the largest that *error* metres
+/// anywhere in the sphere project to, never nearer than the near plane. Off the view axis a length projects larger
+/// by 1 / cos² of its angle to the axis, so the smallest scale is the sphere's nearest depth times the cosine of its
+/// tangent ray farthest from the axis (Nanite's GetProjectedEdgeScales); the distance alone would let the error grow
+/// to over twice the threshold towards the corners of the screen.
+float ProjectedError(SceneViewData view, float4 sphere, float error, float scale)
+{
+    float zNear = view.Forward.w;
+    float radius = sphere.w;
+    float distanceSquared = Dot(sphere.xyz, sphere.xyz);
+    float axial = Sqrt(Max(distanceSquared - sphere.z * sphere.z, 0.0));
+    float tangentSquared = distanceSquared - radius * radius;
+    float tangent = Sqrt(Max(tangentSquared, 0.0));
+    float cosAngle = (tangent * sphere.z - radius * axial) / Max(distanceSquared, 1e-12);
+    if (tangentSquared < 0 || cosAngle * tangent < zNear)
+    {
+        // The tangent ray leaves the sphere before the near plane, or the camera is inside: the farthest point of
+        // the sphere on the near plane.
+        float height = zNear - sphere.z;
+        float x = axial + Sqrt(Max(radius * radius - height * height, 0.0));
+        cosAngle = zNear / Sqrt(x * x + zNear * zNear);
+    }
+    float projection = Max(sphere.z - radius, zNear) * cosAngle;
+    return error * scale * view.Up.w * 0.5 * (float)view.Height / projection;
+}
+
+float MaxScale(SceneInstance instance)
+{
+    return Max(Abs(instance.ScaleX), Max(Abs(instance.ScaleY), Abs(instance.ScaleZ)));
+}
+
+public struct SceneLodInstanceArguments
+{
+    public Span<SceneInstance> Instances;
+    public Span<SceneMesh> Meshes;
+    public Span<SceneViewData> Views;
+    public Span<ulong, Access.ReadWrite> Queue;
+    public Span<uint, Access.ReadWrite> State;
+    /// The traversal's list of nodes set aside for its second phase (SceneTraverseArguments::Occluded).
+    public Span<ulong, Access.ReadWrite> Occluded;
+    /// The last frame's HZB.
+    public Texture2D<float> Hzb;
+    public uint InstanceCount;
+    public uint QueueCapacity;
+    public uint OccludedCapacity;
+    public uint HzbMips;
+    /// CullHzb: test instances against the HZB.
+    public uint Flags;
+}
+
+/// Adds *count* entries to the queue, the pending count first so that no thread sees the queue drained while they are
+/// being written; entries past the queue's end are dropped and counted.
+void Push(Span<ulong, Access.ReadWrite> queue, Span<uint, Access.ReadWrite> state, uint capacity, uint instance,
+          uint firstNode, uint count)
+{
+    Atomic.Add(ref state[StatePending], count);
+    uint first = Atomic.Add(ref state[StateWrite], count);
+    for (uint i = 0; i < count; ++i)
+    {
+        if (first + i < capacity)
+        {
+            Atomic.Store(ref queue[first + i], ((ulong)instance << 32) | (ulong)(firstNode + i));
+        }
+        else
+        {
+            Atomic.Add(ref state[StateOverflow], 1u);
+            Atomic.Add(ref state[StatePending], 0xFFFFFFFFu);
+        }
+    }
+}
+
+/// One thread per instance slot: an instance whose mesh's sphere meets the frustum queues the roots of its trees, or,
+/// if the last frame's HZB hides the sphere, sets them aside for the traversal's second phase.
+[Compute(64, 1, 1)]
+void CullInstances([DispatchThreadId] uint3 id, [Uniform] in SceneLodInstanceArguments args)
+{
+    if (id.x >= args.InstanceCount)
+    {
+        return;
+    }
+    SceneInstance instance = args.Instances[id.x];
+    if (instance.Mesh == InvalidMesh)
+    {
+        return;
+    }
+    SceneMesh mesh = args.Meshes[instance.Mesh];
+    SceneViewData view = args.Views[0];
+    if (mesh.DepthCount == 0 || IsOutsideFrustum(view, ToViewSphere(instance, view, mesh.Sphere)))
+    {
+        return;
+    }
+    SceneViewData hzbView = args.Views[1];
+    if ((args.Flags & CullHzb) != 0 &&
+        IsOccluded(args.Hzb, args.HzbMips, hzbView, ToViewSphere(instance, hzbView, mesh.Sphere)))
+    {
+        uint first = Atomic.Add(ref args.State[StateOccluded], mesh.DepthCount);
+        if (first + mesh.DepthCount <= args.OccludedCapacity)
+        {
+            for (uint i = 0; i < mesh.DepthCount; ++i)
+            {
+                args.Occluded[first + i] = ((ulong)id.x << 32) | (ulong)(mesh.FirstNode + i);
+            }
+            return;
+        }
+        // A full list: all are queued now, as if visible; the entries that still fit are filled with the roots too,
+        // which the second phase drops again unless this frame's HZB shows them, and the count stays past the
+        // capacity, which the second phase clamps to.
+        for (uint i = 0; first + i < args.OccludedCapacity; ++i)
+        {
+            args.Occluded[first + i] = ((ulong)id.x << 32) | (ulong)(mesh.FirstNode + i);
+        }
+    }
+    Push(args.Queue, args.State, args.QueueCapacity, id.x, mesh.FirstNode, mesh.DepthCount);
+}
+
+public struct SceneTraverseArguments
+{
+    public Span<SceneInstance> Instances;
+    public Span<SceneMesh> Meshes;
+    public Span<SceneNode> Nodes;
+    public Span<SceneGroup> Groups;
+    public Span<uint> PageTable;
+    public Span<uint, Access.ReadWrite> PageRequested;
+    public Span<uint, Access.ReadWrite> Requests;
+    public Span<SceneViewData> Views;
+    public Span<ulong, Access.ReadWrite> Queue;
+    public Span<uint, Access.ReadWrite> State;
+    /// Two uint per entry: instance, then the group in the group table.
+    public Span<uint, Access.ReadWrite> VisibleGroups;
+    /// The queue entries of the nodes the first phase's HZB hid, for the second phase.
+    public Span<ulong, Access.ReadWrite> Occluded;
+    /// The last frame's HZB in the first phase, this frame's of the first raster in the second.
+    public Texture2D<float> Hzb;
+    public uint QueueCapacity;
+    public uint MaxGroups;
+    public uint MaxRequests;
+    public float LodThreshold;
+    /// This frame's number plus one, which page requests are stamped with so a page is asked for once a frame.
+    public uint Frame;
+    public uint OccludedCapacity;
+    public uint HzbMips;
+    /// CullHzb: test nodes against the HZB.
+    public uint Flags;
+    public uint Phase;
+    /// The threads of the dispatch, which share out the second phase's first entries.
+    public uint ThreadCount;
+}
+
+/// Asks for *page* (in the page table) once this frame, for a group whose error on screen is *error* pixels; of the
+/// views and instances that need the page in a frame, the first one's error is sent.
+void RequestPage(SceneTraverseArguments args, uint page, float error)
+{
+    if (Atomic.Exchange(ref args.PageRequested[page], args.Frame) == args.Frame)
+    {
+        return;
+    }
+    uint slot = Atomic.Add(ref args.Requests[0], 1u);
+    if (slot < args.MaxRequests)
+    {
+        args.Requests[RequestHeaderWords + slot * RequestWords] = page;
+        args.Requests[RequestHeaderWords + slot * RequestWords + 1] = AsUInt(error);
+    }
+    else
+    {
+        Atomic.Add(ref args.Requests[1], 1u);
+    }
+}
+
+/// One queue entry: a node of an instance's mesh. An inner node too coarse on screen queues its children; a leaf
+/// whose group is too coarse lists the group if its page is resident and asks for the page if not.
+void VisitNode(SceneTraverseArguments args, ulong item)
+{
+    uint instanceIndex = (uint)(item >> 32);
+    uint nodeIndex = (uint)(item & 0xFFFFFFFFul);
+    SceneInstance instance = args.Instances[instanceIndex];
+    SceneMesh mesh = args.Meshes[instance.Mesh];
+    SceneNode node = args.Nodes[nodeIndex];
+    SceneViewData view = args.Views[0];
+    float4 sphere = ToViewSphere(instance, view, node.Sphere);
+    float error = ProjectedError(view, sphere, node.Error, MaxScale(instance));
+    if (IsOutsideFrustum(view, sphere) || error <= args.LodThreshold)
+    {
+        return;
+    }
+    if ((args.Flags & CullHzb) != 0)
+    {
+        // The first phase tests against the last frame's HZB, in the view as it rendered it.
+        SceneViewData hzbView = args.Views[args.Phase == 0 ? 1u : 0u];
+        if (IsOccluded(args.Hzb, args.HzbMips, hzbView, ToViewSphere(instance, hzbView, node.Sphere)))
+        {
+            if (args.Phase != 0)
+            {
+                return;
+            }
+            uint slot = Atomic.Add(ref args.State[StateOccluded], 1u);
+            if (slot < args.OccludedCapacity)
+            {
+                args.Occluded[slot] = item;
+                return;
+            }
+            // A full list: traversed now, as if visible.
+        }
+    }
+    if (node.Group < 0)
+    {
+        Push(args.Queue, args.State, args.QueueCapacity, instanceIndex, mesh.FirstNode + node.FirstChild,
+             node.ChildCount);
+        return;
+    }
+    uint groupIndex = mesh.FirstGroup + (uint)node.Group;
+    SceneGroup group = args.Groups[groupIndex];
+    uint page = mesh.FirstPage + group.Page;
+    if (args.PageTable[page] == NotResident)
+    {
+        RequestPage(args, page, error);
+        return;
+    }
+    uint slot = Atomic.Add(ref args.State[StateGroups], 1u);
+    if (slot < args.MaxGroups)
+    {
+        args.VisibleGroups[slot * 2] = instanceIndex;
+        args.VisibleGroups[slot * 2 + 1] = groupIndex;
+    }
+    else
+    {
+        Atomic.Add(ref args.State[StateGroupOverflow], 1u);
+    }
+}
+
+/// The persistent traversal: every thread takes queue entries until none is pending. A thread looks at its entry once
+/// per iteration and never waits in an inner loop, so threads of one wave never wait on each other: one whose entry
+/// is not written yet keeps it and tries again next iteration while the others go on. The second phase's threads
+/// first write the nodes the first phase set aside into the queue range BuildGroupArguments reserved for them.
+[Compute(64, 1, 1)]
+void Traverse([DispatchThreadId] uint3 id, [Uniform] in SceneTraverseArguments args)
+{
+    if (args.Phase != 0)
+    {
+        uint seeds = Min(args.State[StateOccluded], args.OccludedCapacity);
+        uint first = args.State[StateSeedFirst];
+        for (uint i = id.x; i < seeds; i += args.ThreadCount)
+        {
+            if (first + i < args.QueueCapacity)
+            {
+                Atomic.Store(ref args.Queue[first + i], args.Occluded[i]);
+            }
+            else
+            {
+                Atomic.Add(ref args.State[StateOverflow], 1u);
+                Atomic.Add(ref args.State[StatePending], 0xFFFFFFFFu);
+            }
+        }
+    }
+    uint index = NoIndex;
+    for (uint iteration = 0; iteration < MaxTraversalIterations; ++iteration)
+    {
+        if (index == NoIndex)
+        {
+            index = Atomic.Add(ref args.State[StateRead], 1u);
+        }
+        ulong item = index < args.QueueCapacity ? Atomic.Load(ref args.Queue[index]) : EmptyItem;
+        if (item != EmptyItem)
+        {
+            VisitNode(args, item);
+            Atomic.Add(ref args.State[StatePending], 0xFFFFFFFFu);
+            index = NoIndex;
+        }
+        else if (Atomic.Load(ref args.State[StatePending]) == 0)
+        {
+            return;
+        }
+    }
+}
+
+public struct SceneGroupArgumentsArguments
+{
+    public Span<uint, Access.ReadWrite> State;
+    public Span<uint, Access.ReadWrite> Requests;
+    /// Three uint: one workgroup per visible group.
+    public Span<uint, Access.ReadWrite> Arguments;
+    public uint MaxGroups;
+    public uint GroupsX;
+    public uint OccludedCapacity;
+    public uint Phase;
+}
+
+/// Sizes the group culling dispatch of a phase, and reports how the traversal went with the page requests. After the
+/// first phase, it also queues the nodes that phase set aside for the second: the read position moves up to the write
+/// position, past the entries idle threads took and dropped when they left, and the range after it is theirs.
+[Compute(1, 1, 1)]
+void BuildGroupArguments([Uniform] in SceneGroupArgumentsArguments args)
+{
+    Atomic.Max(ref args.Requests[RequestQueuePeak], args.State[StateWrite]);
+    uint flags = (args.State[StateOverflow] != 0 ? TraversalQueueFull : 0u) |
+                 (args.State[StateGroupOverflow] != 0 ? TraversalGroupsFull : 0u) |
+                 (args.State[StatePending] != 0 ? TraversalUnfinished : 0u);
+    if (flags != 0)
+    {
+        Atomic.Or(ref args.Requests[RequestTraversalFlags], flags);
+    }
+    uint listed = Min(args.State[StateGroups], args.MaxGroups);
+    uint count = listed;
+    if (args.Phase == 0)
+    {
+        args.State[StateFirstGroups] = listed;
+        uint write = args.State[StateWrite];
+        uint seeds = Min(args.State[StateOccluded], args.OccludedCapacity);
+        args.State[StateRead] = write;
+        args.State[StateSeedFirst] = write;
+        args.State[StateWrite] = write + seeds;
+        args.State[StatePending] = seeds;
+    }
+    else
+    {
+        count -= args.State[StateFirstGroups];
+    }
+    uint x = Min(count, args.GroupsX);
+    args.Arguments[0] = x;
+    args.Arguments[1] = x == 0 ? 0 : (count + args.GroupsX - 1) / args.GroupsX;
+    args.Arguments[2] = 1;
+}
+
+public struct SceneCullGroupsArguments
+{
+    public Span<SceneInstance> Instances;
+    public Span<SceneMesh> Meshes;
+    public Span<SceneGroup> Groups;
+    public Span<SceneCluster> Clusters;
+    public Span<uint> PageTable;
+    public Span<uint, Access.ReadWrite> SlotUsed;
+    public Span<SceneViewData> Views;
+    public Texture2D<float> Hzb;
+    public Span<uint> VisibleGroups;
+    public Span<uint> State;
+    public Span<SceneVisibleCluster, Access.ReadWrite> Visible;
+    public Span<SceneVisibleCluster, Access.ReadWrite> Candidates;
+    public Span<uint, Access.ReadWrite> Hardware;
+    public Span<uint, Access.ReadWrite> Software;
+    public Span<uint, Access.ReadWrite> Counts;
+    public uint HzbMips;
+    public uint MaxVisible;
+    public uint MaxGroups;
+    public uint GroupsX;
+    public float LodThreshold;
+    public uint Frame;
+    /// CullHzb: test against the HZB.
+    public uint Flags;
+    /// Clusters whose triangle edges are shorter than this many pixels on screen go to the software raster.
+    public float SoftwarePixels;
+    /// The first phase keeps what the last frame's HZB hides as candidates; the second, of the groups the second
+    /// traversal listed, tests against this frame's HZB and drops what it hides.
+    public uint Phase;
+}
+
+/// One workgroup per listed group, one thread per cluster: a cluster draws when its RefinedGroup is fine enough on
+/// screen or not resident (its own group is too coarse, or traversal would not have listed it). Then the frustum,
+/// the backface cone and the HZB of the phase.
+[Compute(64, 1, 1)]
+void CullGroups([GroupId] uint3 workgroup, [GroupThreadId] uint3 thread, [Uniform] in SceneCullGroupsArguments args)
+{
+    uint listed = (args.Phase == 0 ? 0u : args.State[StateFirstGroups]) + workgroup.y * args.GroupsX + workgroup.x;
+    if (listed >= Min(args.State[StateGroups], args.MaxGroups))
+    {
+        return;
+    }
+    uint instanceIndex = args.VisibleGroups[listed * 2];
+    SceneGroup group = args.Groups[args.VisibleGroups[listed * 2 + 1]];
+    SceneInstance instance = args.Instances[instanceIndex];
+    SceneMesh mesh = args.Meshes[instance.Mesh];
+    uint slot = args.PageTable[mesh.FirstPage + group.Page];
+    if (slot == NotResident)
+    {
+        return;
+    }
+    if (thread.x == 0)
+    {
+        args.SlotUsed[slot] = args.Frame;
+    }
+    SceneViewData view = args.Views[0];
+    SceneViewData hzbView = args.Views[args.Phase == 0 ? 1u : 0u];
+    float scale = MaxScale(instance);
+    uint firstCluster = group.ClusterRange & 65535;
+    uint clusterCount = group.ClusterRange >> 16;
+    for (uint i = thread.x; i < clusterCount; i += 64)
+    {
+        uint clusterIndex = slot * SlotClusters + firstCluster + i;
+        SceneCluster cluster = args.Clusters[clusterIndex];
+        if (cluster.RefinedGroup >= 0)
+        {
+            SceneGroup finer = args.Groups[mesh.FirstGroup + (uint)cluster.RefinedGroup];
+            if (args.PageTable[mesh.FirstPage + finer.Page] != NotResident &&
+                ProjectedError(view, ToViewSphere(instance, view, finer.Sphere), finer.Error, scale) > args.LodThreshold)
+            {
+                continue;
+            }
+        }
+        float4 sphere = ToViewSphere(instance, view, cluster.Sphere);
+        if (IsBackfacing(instance, view, cluster) || IsOutsideFrustum(view, sphere))
+        {
+            continue;
+        }
+        if ((args.Flags & CullHzb) != 0 &&
+            IsOccluded(args.Hzb, args.HzbMips, hzbView, ToViewSphere(instance, hzbView, cluster.Sphere)))
+        {
+            if (args.Phase == 0)
+            {
+                Append(args.Candidates, args.Counts, CountCandidates, args.MaxVisible, instanceIndex, clusterIndex);
+            }
+        }
+        else
+        {
+            AppendVisible(args.Visible, args.Hardware, args.Software, args.Counts, args.MaxVisible, instanceIndex,
+                          clusterIndex,
+                          IsSoftwareRaster(view, sphere, cluster.MaxEdgeLength * scale, args.SoftwarePixels));
+        }
+    }
+}

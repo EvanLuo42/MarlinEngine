@@ -1,0 +1,150 @@
+/// BSDFs (Documentation/Architecture/07 §4.3): the interface a custom BSDF implements, what the lighting passes give it,
+/// and the built-in Slab BSDF the lighting passes evaluate for Slab closures.
+namespace Marlin.Shading;
+
+/// Where a BSDF is evaluated: the shading normal and the direction to the viewer, unit vectors in world space.
+public struct BsdfContext
+{
+    public float3 N;
+    public float3 V;
+}
+
+/// One light as a BSDF sees it: the unit direction towards it and the illuminance it brings, perpendicular to that
+/// direction.
+public struct LightSample
+{
+    public float3 L;
+    public float3 Illuminance;
+}
+
+/// An importance sample of a BSDF for path tracing: the direction, its weight (value × cosine / pdf) and pdf.
+public struct BsdfSample
+{
+    public float3 L;
+    public float3 Weight;
+    public float Pdf;
+}
+
+/// A BSDF a material can return through Surface.Custom. EvaluateDirect gives the fraction of a light's illuminance
+/// reflected towards the viewer per steradian, the cosine included; the lighting pass multiplies it by the
+/// illuminance. The optional members serve indirect light and path tracing; a path tracer skips a closure without
+/// Sample and Pdf (07 §4.3).
+public interface IBsdf
+{
+    half3 EvaluateDirect(in BsdfContext ctx, in LightSample light);
+    [Optional] half3 EvaluateIndirect(in BsdfContext ctx, float3 ambient);
+    [Optional] BsdfSample Sample(in BsdfContext ctx, float2 u);
+    [Optional] float Pdf(in BsdfContext ctx, float3 l);
+}
+
+/// The capability bits of a custom BSDF type: which optional members it implements.
+public const uint BsdfHasIndirect = 1;
+public const uint BsdfHasSample = 2;
+public const uint BsdfHasPdf = 4;
+
+public uint GetBsdfCapabilities<T>() where T : IBsdf
+{
+    uint bits = 0;
+    static if (T.Implements(nameof(IBsdf.EvaluateIndirect)))
+    {
+        bits |= BsdfHasIndirect;
+    }
+    static if (T.Implements(nameof(IBsdf.Sample)))
+    {
+        bits |= BsdfHasSample;
+    }
+    static if (T.Implements(nameof(IBsdf.Pdf)))
+    {
+        bits |= BsdfHasPdf;
+    }
+    return bits;
+}
+
+public const float Pi = 3.14159265;
+
+/// GGX distribution, with alpha the squared roughness.
+float DistributionGgx(float nh, float alpha)
+{
+    float a2 = alpha * alpha;
+    float d = nh * nh * (a2 - 1) + 1;
+    return a2 / (Pi * d * d);
+}
+
+/// Smith's height-correlated visibility for GGX, the 1 / (4 nl nv) included.
+float VisibilitySmithGgx(float nl, float nv, float alpha)
+{
+    float a2 = alpha * alpha;
+    float lambdaV = nl * Sqrt(nv * nv * (1 - a2) + a2);
+    float lambdaL = nv * Sqrt(nl * nl * (1 - a2) + a2);
+    return 0.5 / Max(lambdaV + lambdaL, 1e-5);
+}
+
+public float3 FresnelSchlick(float3 f0, float vh)
+{
+    float f = Pow(1 - Saturate(vh), 5.0);
+    return f0 + (float3(1, 1, 1) - f0) * f;
+}
+
+/// Charlie sheen distribution (Estevez and Kulla) for the fuzz, with its approximate visibility.
+float DistributionCharlie(float nh, float roughness)
+{
+    float invAlpha = 1 / Max(roughness * roughness, 1e-3);
+    float sin2 = Max(1 - nh * nh, 0.0078125);
+    return (2 + invAlpha) * Pow(sin2, invAlpha * 0.5) / (2 * Pi);
+}
+
+float VisibilityAshikhmin(float nl, float nv)
+{
+    return 1 / (4 * (nl + nv - nl * nv) + 1e-5);
+}
+
+/// The built-in Slab BSDF: Lambert diffuse and GGX specular, the fuzz layered over them, as the lighting passes
+/// evaluate Slab closures.
+public struct SlabBsdf
+{
+    public static float3 EvaluateDirect(Slab slab, in BsdfContext ctx, in LightSample light)
+    {
+        float nl = Saturate(Dot(ctx.N, light.L));
+        float nv = Max(Dot(ctx.N, ctx.V), 1e-4);
+        if (nl <= 0)
+        {
+            return float3(0, 0, 0);
+        }
+        float3 h = Normalize(light.L + ctx.V);
+        float nh = Saturate(Dot(ctx.N, h));
+        float vh = Saturate(Dot(ctx.V, h));
+        float roughness = Max((float)slab.Roughness, 0.03);
+        float alpha = roughness * roughness;
+        float3 f0 = (float3)slab.F0;
+        float3 fresnel = FresnelSchlick(f0, vh);
+        float3 specular = fresnel * (DistributionGgx(nh, alpha) * VisibilitySmithGgx(nl, nv, alpha));
+        float3 diffuse = (float3)slab.DiffuseColor * (1 / Pi);
+        float3 base = (diffuse * (float3(1, 1, 1) - fresnel) + specular) * nl;
+        float fuzz = (float)slab.Fuzz;
+        if (fuzz > 0)
+        {
+            float fuzzRoughness = Max((float)slab.FuzzRoughness, 0.07);
+            float3 sheen = (float3)slab.FuzzColor *
+                           (DistributionCharlie(nh, fuzzRoughness) * VisibilityAshikhmin(nl, nv) * nl);
+            base = base * (1 - fuzz) + sheen * fuzz;
+        }
+        return base;
+    }
+
+    /// Constant ambient light from every direction: the diffuse albedo and the specular reflectance averaged over
+    /// the hemisphere (Karis's analytic fit of the split-sum environment BRDF).
+    public static float3 EvaluateIndirect(Slab slab, in BsdfContext ctx, float3 ambient)
+    {
+        float nv = Saturate(Dot(ctx.N, ctx.V));
+        float roughness = (float)slab.Roughness;
+        float4 c0 = float4(-1, -0.0275, -0.572, 0.022);
+        float4 c1 = float4(1, 0.0425, 1.04, -0.04);
+        float4 r = c0 * roughness + c1;
+        float a004 = Min(r.x * r.x, Exp2(-9.28 * nv)) * r.x + r.y;
+        float2 ab = float2(-1.04, 1.04) * a004 + float2(r.z, r.w);
+        float3 specular = (float3)slab.F0 * ab.x + float3(ab.y, ab.y, ab.y);
+        float3 diffuse = (float3)slab.DiffuseColor;
+        float3 fuzz = (float3)slab.FuzzColor * (float)slab.Fuzz;
+        return ambient * (diffuse * (1 - (float)slab.Fuzz) + specular + fuzz * 0.1);
+    }
+}

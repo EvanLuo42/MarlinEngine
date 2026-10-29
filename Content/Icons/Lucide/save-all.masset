@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "9ea08230-6b38-5d47-835f-0ba562d8497a"
+    !Name = "save-all"
+    SourceFile = `source:save-all.svg#8f0529cc-a960-49f0-9f02-d7b233d03353`
+}

@@ -1,0 +1,18 @@
+# Build machines: populate the shared cache and build distributed.
+#   marlin generate --preset CI
+# Same keys as Build/BuildSettings.toml; only what differs is listed.
+
+warnings_as_errors = true
+
+[cache]
+enabled = true
+path = '\\nas\fastbuild-cache'    # TODO: the team's cache share
+mode = "write"
+mount_point = ""
+
+[distribution]
+enabled = true
+brokerage_path = '\\nas\fastbuild-brokerage'    # TODO: the team's brokerage share
+
+[solution]
+enabled = false

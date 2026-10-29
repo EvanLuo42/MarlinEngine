@@ -1,0 +1,57 @@
+/// The hierarchical depth buffer (HZB) of a view, built from its visibility buffer (Documentation/Architecture/07 §5.3):
+/// mip 0 is half the view's size rounded up to a power of two, and each texel keeps the farthest (smallest, reversed)
+/// depth of the 2×2 texels under it. What lies outside the view counts as empty, depth zero, which hides nothing.
+namespace Marlin.Passes.Scene;
+
+public struct SceneHzbFromVisBufferArguments
+{
+    public Span<ulong> VisBuffer;
+    public Texture2D<float, Access.ReadWrite, ImageFormat.R32f> Output;
+    public uint Width;
+    public uint Height;
+}
+
+float VisibilityDepth(Span<ulong> visBuffer, uint width, uint height, uint x, uint y)
+{
+    return x < width && y < height ? AsFloat((uint)(visBuffer[y * width + x] >> 32)) : 0;
+}
+
+[Compute(8, 8, 1)]
+void BuildHzbFromVisBuffer([DispatchThreadId] uint3 id, [Uniform] in SceneHzbFromVisBufferArguments args)
+{
+    uint2 size = args.Output.Size;
+    if (id.x >= size.x || id.y >= size.y)
+    {
+        return;
+    }
+    uint x = id.x * 2;
+    uint y = id.y * 2;
+    float a = VisibilityDepth(args.VisBuffer, args.Width, args.Height, x, y);
+    float b = VisibilityDepth(args.VisBuffer, args.Width, args.Height, x + 1, y);
+    float c = VisibilityDepth(args.VisBuffer, args.Width, args.Height, x, y + 1);
+    float d = VisibilityDepth(args.VisBuffer, args.Width, args.Height, x + 1, y + 1);
+    args.Output.Store(int2((int)id.x, (int)id.y), Min(Min(a, b), Min(c, d)));
+}
+
+public struct SceneHzbMipArguments
+{
+    /// The mip above, as its own view.
+    public Texture2D<float> Source;
+    public Texture2D<float, Access.ReadWrite, ImageFormat.R32f> Output;
+}
+
+[Compute(8, 8, 1)]
+void BuildHzbMip([DispatchThreadId] uint3 id, [Uniform] in SceneHzbMipArguments args)
+{
+    uint2 size = args.Output.Size;
+    if (id.x >= size.x || id.y >= size.y)
+    {
+        return;
+    }
+    int2 source = int2((int)id.x * 2, (int)id.y * 2);
+    float a = args.Source.Load(source);
+    float b = args.Source.Load(source + int2(1, 0));
+    float c = args.Source.Load(source + int2(0, 1));
+    float d = args.Source.Load(source + int2(1, 1));
+    args.Output.Store(int2((int)id.x, (int)id.y), Min(Min(a, b), Min(c, d)));
+}

@@ -1,0 +1,8 @@
+!Version "1.0"
+
+// An empty project inside the engine tree: what the editor and game open when started from the IDE
+// (Build/BuildSettings.toml `solution.debug_project`), and a place to try things. It has no Engine binding because it
+// always runs with the engine around it.
+Project
+{
+}

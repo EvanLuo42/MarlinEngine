@@ -1,0 +1,155 @@
+!Version "1.0"
+
+// Engine defaults. Platform layers, the project and the user override them in their own Engine.mtext,
+// and `-Config:Engine.Section.Key=Value` overrides everything.
+
+Loop
+{
+    // Simulation steps per second; rendering runs at whatever rate it can.
+    FixedRate = 60
+    // Frames per second at most, 0 for no limit; keeps an idle loop from spinning a core until presentation paces it.
+    MaxFrameRate = 240
+    // Longest frame the simulation catches up on, in seconds.
+    MaxDelta = 0.25
+}
+
+Jobs
+{
+    WorkerCount = 0
+    ReservedCores = 0
+}
+
+Log
+{
+    WriteFile = true
+}
+
+Window
+{
+    Width = 1280
+    Height = 720
+    Fullscreen = false
+    // Opens maximized but keeps its frame (Fullscreen is borderless); restoring returns to Width and Height.
+    Maximized = false
+    // The smallest client size the main window can be resized to, at 96 DPI; 0 leaves it to the OS.
+    MinWidth = 0
+    MinHeight = 0
+    @if Target == Editor
+    {
+        Maximized = true
+        MinWidth = 960
+        MinHeight = 540
+    }
+    // Whether the main window draws its own title bar; the editor does, with its tabs in it.
+    CustomFrame = false
+    @if Target == Editor
+    {
+        CustomFrame = true
+    }
+}
+
+Packaging
+{
+    // Bytes per compression block; a read decompresses only the blocks it touches.
+    BlockSize = 65536
+    // The compression matrix (Documentation/Architecture/06 §5.1): the codec each kind of data is packaged with, keyed
+    // by PackageClass. Platform layers name their fastest format.
+    // RECOVERY-DECISION: the original matrix was cut off in the recovered fragment; Lz4 everywhere, the fast-loading
+    // default, with Zstd left to products that trade load speed for size.
+    Compression =
+    {
+        Package = { Format = "Lz4" }
+        Bulk = { Format = "Lz4" }
+        GpuBuffer = { Format = "Lz4" }
+        GpuTexture = { Format = "Lz4" }
+    }
+}
+
+World
+{
+    // Whether the process opens a world on its startup level (-Level=<UUID>, -Map=<UUID> or Product.StartupLevel):
+    // the game and the server do, the editor and programs do not.
+    LoadStartupLevel = false
+    @if Target == Game
+    {
+        LoadStartupLevel = true
+    }
+    @if Target == Server
+    {
+        LoadStartupLevel = true
+    }
+    // The profile of that world, a section of WorldProfiles.mtext.
+    StartupProfile = "Game"
+    @if Target == Server
+    {
+        StartupProfile = "Server"
+    }
+}
+
+UIText
+{
+    // RECOVERY-DECISION D3: new Guids; the originals were lost with the .masset files.
+    // RECOVERY-DECISION D6: the three faces the 00:37 UiTest log shows loading; the other weights are not configured.
+    // The UI fonts, in fallback order (Inter, then Noto Sans).
+    DefaultFonts = [<Inter-Regular#6b48b301-2230-4bb9-8198-c5ad1a7efe51>, <NotoSans-Regular#71f4f65d-04a9-4ae9-ad34-2aa19c0d1309>]
+    // The monospace font for tables, logs and stats (JetBrains Mono).
+    MonospaceFont = <JetBrainsMono-Regular#7cf28371-09ff-4c89-9a4e-e23387f7202e>
+}
+
+// RECOVERY-DECISION TM-D4: the section name and the first comment line were cut off in the recovered fragment;
+// "Textures" is what TextureConverter reads (Engine.Textures). The rest is the fragment verbatim.
+Textures
+{
+    // Kinds of texture, as TextureSource.Compression names them, to the format each is encoded to (06 §3.4). Every
+    // platform maps them to its GPU's formats in Platforms/<Platform>/Config/Engine.mtext; these uncompressed
+    // formats are the fallback any GPU reads. Quality runs from 0, fastest, to 1, best; RdoLambda above 0 trades
+    // quality for smaller packages where the encoder supports it.
+    Compression =
+    {
+        Color =
+        {
+            Format = RGBA8
+        }
+        Normal =
+        {
+            Format = RG8
+        }
+        Mask =
+        {
+            Format = RGBA8
+        }
+        Grayscale =
+        {
+            Format = R8
+        }
+        Hdr =
+        {
+            Format = RGBA16Float
+        }
+        Uncompressed =
+        {
+            Format = RGBA8
+        }
+    }
+}
+
+Shaders
+{
+    // Device profiles (MarlinLanguage.md §9.7), best first: the shader library runs the first one whose RHI the
+    // device is and whose features it has, and every global shader gets a variant per profile whose code differs.
+    // Platform layers add or override profiles in their own Engine.mtext.
+    // RECOVERY-DECISION: the original list was lost; Ada-class Vulkan devices first, then the baseline any device runs.
+    Profiles =
+    [
+        { Name = "Vulkan.Ada" Rhi = "Vulkan" Target = "spirv" Features = ["ShaderExecutionReorder", "CooperativeVector"] },
+        { Name = "Vulkan.Baseline" Rhi = "Vulkan" Target = "spirv" Features = [] }
+    ]
+}
+
+AssetIndex
+{
+    // An indexer an editor or game started for itself (-ExitWhenIdle) exits after this many seconds with no client
+    // connected but its converter workers, no scan running and no conversion waiting, so it holds no files once they close (06 §2). One started
+    // by hand stays.
+    IdleExitSeconds = 10
+}

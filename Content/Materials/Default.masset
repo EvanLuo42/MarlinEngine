@@ -1,0 +1,8 @@
+!Version "1.0"
+
+Material
+{
+    !UUID = "2a527f2c-9f27-4e67-8ae9-3dbcf5eb0ee6"
+    !Name = "Default"
+    Shader = </Engine/Language/Shaders/Materials/Default:Marlin.Materials.Default#ef2b48e6-a831-4053-b260-725ce54ce3de>
+}

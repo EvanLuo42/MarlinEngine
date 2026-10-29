@@ -1,0 +1,67 @@
+/// Tests of string handling and number parsing in the core library (MarlinScript §10.1).
+namespace Marlin.Tests;
+
+[Test]
+void StringsSearchReplaceAndTrim()
+{
+    string text = "  one, two, three  ";
+    Assert.Equal("one, two, three", text.Trim());
+    Assert.Equal("one, two, three  ", text.TrimStart());
+    Assert.Equal(5, text.IndexOf(","));
+    Assert.Equal(10, text.IndexOf(",", 6));
+    Assert.Equal(10, text.LastIndexOf(","));
+    Assert.Equal(-1, text.IndexOf(";"));
+    Assert.Equal("  one; two; three  ", text.Replace(",", ";"));
+    Assert.Equal("ABC-é", "abc-é".ToUpperAscii());
+    Assert.True("".IsEmpty);
+}
+
+[Test]
+void StringsSplitAndJoin()
+{
+    string[] parts = "a,,b".Split(",");
+    Assert.Equal(3, parts.Length);
+    Assert.Equal("", parts[1]);
+    Assert.Equal("b", parts[2]);
+    Assert.Equal("a+b", string.Join("+", new string[] { "a", "b" }));
+    Assert.Equal(1, "plain".Split("--").Length);
+}
+
+[Test]
+void RunesDecodeUtf8()
+{
+    string text = "aé€😀";
+    Assert.Equal(10, text.Length);
+    var builder = new StringBuilder();
+    int count = 0;
+    foreach (Rune rune in text.Runes())
+    {
+        builder.Append(rune);
+        count += 1;
+    }
+    Assert.Equal(4, count);
+    Assert.Equal(text, builder.ToString());
+}
+
+[Test]
+void NumbersParse()
+{
+    int a;
+    Assert.True(Number.TryParse("-42", out a));
+    Assert.Equal(-42, a);
+    Assert.False(Number.TryParse("42x", out a));
+    Assert.Equal(0, a);
+    ulong big;
+    Assert.True(Number.TryParse("18446744073709551615", out big));
+    Assert.True(big == 18446744073709551615ul);
+    double d;
+    Assert.True(Number.TryParse("2.5e3", out d));
+    Assert.Equal(2500.0, d);
+    float f;
+    Assert.True(Number.TryParse("0.1", out f));
+    Assert.Equal(0.1f, f);
+    bool b;
+    Assert.True(Number.TryParse("TRUE", out b));
+    Assert.True(b);
+    Assert.False(Number.TryParse("yes", out b));
+}

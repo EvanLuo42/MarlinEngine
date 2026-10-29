@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "7155a049-ff2d-5fa0-b847-97c8d3745d91"
+    !Name = "box"
+    SourceFile = `source:box.svg#ffbbdf53-abe0-4deb-b73e-1cde940b594e`
+}

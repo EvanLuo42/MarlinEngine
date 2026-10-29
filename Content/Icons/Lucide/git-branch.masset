@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "deb7778e-9e69-5804-9add-413fc4980674"
+    !Name = "git-branch"
+    SourceFile = `source:git-branch.svg#69403f46-9555-46f2-a02e-1dcd4ee36ac3`
+}

@@ -1,0 +1,101 @@
+/// The closures Material Resolve writes and the lighting passes read (Documentation/Architecture/07 §4.2): a header
+/// per pixel, its first closure in the Slab plane when it is a Slab, and every other closure, custom ones included,
+/// in an overflow list. The tile flags sort tiles into Simple (only plain Slabs), Single (one closure per pixel) and
+/// Complex (several, or custom).
+namespace Marlin.Passes.Material;
+
+using Marlin.Passes.Scene;
+using Marlin.Shading;
+
+/// Header: the closure count in bits 0-2, bit 3 set when closure 0 is in the Slab plane, and from bit 8 the index of
+/// the pixel's first overflow record (NoOverflow without one).
+const uint HeaderPlane = 8;
+const uint NoOverflow = 16777215;
+/// Words of a Slab in the plane or in a record, and of an overflow record: its type, its weight, eight words of data
+/// (a Slab's six, or a custom BSDF's payload), its normal, then the layers over it (CoatTransmittance and CoatSpecular,
+/// as Unorm8x4).
+const uint SlabWords = 6;
+const uint RecordWords = 12;
+/// Tile flags: something drawn, a closure besides a plain Slab, several closures or a custom one.
+const uint TileCovered = 1;
+const uint TileNotSimple = 2;
+const uint TileComplex = 4;
+/// Tile lists, in order: Simple, Single, Complex.
+const uint TileClasses = 3;
+
+public struct ClosureBuffers
+{
+    public Span<uint, Access.ReadWrite> Headers;
+    public Span<uint, Access.ReadWrite> Plane;
+    public Span<uint, Access.ReadWrite> Records;
+    /// The next free overflow record; past RecordCapacity, closures are dropped.
+    public Span<uint, Access.ReadWrite> RecordCount;
+    public uint RecordCapacity;
+}
+
+uint ToUnorm(float value, float scale)
+{
+    return (uint)(Saturate(value) * scale + 0.5);
+}
+
+uint PackUnorm8x4(float4 v)
+{
+    return ToUnorm(v.x, 255) | (ToUnorm(v.y, 255) << 8) | (ToUnorm(v.z, 255) << 16) | (ToUnorm(v.w, 255) << 24);
+}
+
+float4 UnpackUnorm8x4(uint w)
+{
+    return float4((float)(w & 255), (float)((w >> 8) & 255), (float)((w >> 16) & 255), (float)(w >> 24)) / 255.0;
+}
+
+uint PackOctahedral(float3 n)
+{
+    float3 v = n / Max(Abs(n.x) + Abs(n.y) + Abs(n.z), 1e-8);
+    float2 e = v.xy;
+    if (v.z < 0)
+    {
+        e = float2((1 - Abs(v.y)) * SignNotZero(v.x), (1 - Abs(v.x)) * SignNotZero(v.y));
+    }
+    uint x = (uint)((int)(Clamp(e.x, -1.0, 1.0) * 32767.0 + (e.x >= 0 ? 0.5 : -0.5))) & 65535;
+    uint y = (uint)((int)(Clamp(e.y, -1.0, 1.0) * 32767.0 + (e.y >= 0 ? 0.5 : -0.5))) & 65535;
+    return x | (y << 16);
+}
+
+float3 UnpackOctahedral(uint w)
+{
+    return DecodeOctahedral(Snorm16(w, 0), Snorm16(w, 16));
+}
+
+/// The six words of *slab*, its weight and its shading normal *normal* (world space).
+void PackSlab(Slab slab, float3 normal, float weight, out uint[6] words)
+{
+    float3 albedo = Saturate((float3)slab.Albedo);
+    words[0] = ToUnorm(albedo.x, 1023) | (ToUnorm(albedo.y, 1023) << 10) | (ToUnorm(albedo.z, 1023) << 20);
+    words[1] = PackOctahedral(normal);
+    words[2] = PackUnorm8x4(float4((float)slab.Roughness, (float)slab.Metallic, (float)slab.Specular, (float)slab.Fuzz));
+    words[3] = PackUnorm8x4(float4((float3)slab.FuzzColor, (float)slab.FuzzRoughness));
+    float3 emission = (float3)slab.Emission;
+    words[4] = PackHalf2x16(emission.xy);
+    words[5] = PackHalf2x16(float2(emission.z, weight));
+}
+
+/// A Slab back from its words, its normal and weight.
+Slab UnpackSlab(uint w0, uint w1, uint w2, uint w3, uint w4, uint w5, out float3 normal, out float weight)
+{
+    Slab slab = Slab.Default;
+    slab.Albedo = (half3)(float3((float)(w0 & 1023), (float)((w0 >> 10) & 1023), (float)((w0 >> 20) & 1023)) / 1023.0);
+    normal = UnpackOctahedral(w1);
+    float4 a = UnpackUnorm8x4(w2);
+    slab.Roughness = (half)a.x;
+    slab.Metallic = (half)a.y;
+    slab.Specular = (half)a.z;
+    slab.Fuzz = (half)a.w;
+    float4 fuzz = UnpackUnorm8x4(w3);
+    slab.FuzzColor = (half3)fuzz.xyz;
+    slab.FuzzRoughness = (half)fuzz.w;
+    float2 e0 = UnpackHalf2x16(w4);
+    float2 e1 = UnpackHalf2x16(w5);
+    slab.Emission = (half3)float3(e0.x, e0.y, e1.x);
+    weight = e1.y;
+    return slab;
+}

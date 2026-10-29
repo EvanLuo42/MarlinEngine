@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "bb1eb56b-c033-57ee-a25d-8cceafcd73a5"
+    !Name = "layout-grid"
+    SourceFile = `source:layout-grid.svg#587ecfdf-f070-4ddb-9c54-7805bc7414e6`
+}

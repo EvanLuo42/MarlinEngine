@@ -1,0 +1,94 @@
+# Marlin build settings, applied by `marlin generate` and baked into the generated .bff.
+#
+# Layering (later wins):
+#   1. this file
+#   2. Build/BuildSettings.local.toml   per-machine overrides, not versioned
+#   3. Build/Presets/<Name>.toml        `marlin generate --preset CI` (repeatable, in order)
+#   4. command line                     `marlin generate --set cache.path=//nas/fbcache --dist`
+#
+# Unknown keys are errors. Re-run `marlin generate` after changing anything here.
+
+cpp_standard = "c++20"
+c_standard = "c17"
+warnings_as_errors = true
+
+[toolchain]
+# Root of an LLVM install (bin/clang++). Relative paths are relative to the engine root, so an
+# in-repo copy like "Extras/LLVM/Windows/X64" works. Empty: $LLVM_ROOT, default install, PATH.
+llvm_root = ""
+
+[unity]
+enabled = true
+files_per_unit = 16     # source files merged into one unity translation unit
+min_files = 4           # smaller modules compile file by file
+isolate_max = 32        # sources edited recently compile outside their unity file; more than this, none do (0: off)
+isolate_hours = 8       # how recent an edit counts
+
+[pch]
+enabled = true          # modules opt in with `pch = "Private/XxxPCH.h"`
+
+[cache]
+enabled = true
+path = "Saved/FASTBuildCache"   # relative, absolute, or UNC (\\nas\fastbuild-cache)
+mode = "readwrite"              # read | write | readwrite  (CI writes, developers read)
+mount_point = ""                # optional: only use the cache while this volume is mounted
+
+[distribution]
+enabled = false
+brokerage_path = ""     # \\nas\fastbuild-brokerage; exported as FASTBUILD_BROKERAGE_PATH
+workers = []            # explicit worker hosts instead of brokerage discovery
+
+[solution]
+enabled = true          # Visual Studio .sln (Windows hosts only)
+name = "Marlin"
+visual_studio = "auto"  # auto = newest complete install; or "2022", "2026". Decides which VS opens the .sln
+# The project the editor and game open when started from Visual Studio (-Project=); "" starts them without one.
+debug_project = "Samples/Sandbox/Sandbox.mproject"
+
+
+[compile_commands]
+enabled = true                  # <root>/compile_commands.json for clangd, CLion, etc.
+configuration = "Development"   # each source file is listed once, compiled as in this configuration
+
+# Per-configuration settings. `link` picks monolithic (one executable) or modular (one shared
+# library per module) for every target alike, so the editor, the game and the programs share the
+# compiled modules; console platforms are always monolithic.
+# optimize = none | size | speed. sanitizers = clang -fsanitize names, e.g. ["address", "undefined"]; Windows has
+# only those two. The Sanitizers preset turns both on for Debug and Development.
+
+[configurations.Debug]
+optimize = "none"
+lto = false
+debug_info = true
+assertions = true
+sanitizers = []
+definitions = []
+link = "modular"
+
+[configurations.Development]
+optimize = "speed"
+lto = false
+debug_info = true
+assertions = true
+sanitizers = []
+definitions = []
+link = "modular"
+
+[configurations.Profile]
+optimize = "speed"
+lto = true
+debug_info = true
+assertions = false
+sanitizers = []
+definitions = ["MARLIN_PROFILER=1"]
+link = "monolithic"
+
+[configurations.Shipping]
+optimize = "speed"
+lto = true
+# PDBs are kept for crash symbolization (`marlin symbols`), never shipped; executables record only their file name.
+debug_info = true
+assertions = false
+sanitizers = []
+definitions = []
+link = "monolithic"

@@ -1,0 +1,232 @@
+/// The Buffer visualizations of the visibility buffer and the first renderer's Unlit display, shaded by the
+/// triangle's normal (Documentation/Architecture/07 §5.4). Writes the view's scene color in the UI range.
+namespace Marlin.Passes.Scene;
+
+const uint VisualizeUnlit = 0;
+const uint VisualizeInstances = 1;
+const uint VisualizeClusters = 2;
+const uint VisualizeTriangles = 3;
+const uint VisualizeDepth = 4;
+const uint VisualizeNormals = 5;
+const uint VisualizeLod = 6;
+const uint VisualizeRaster = 7;
+const uint VisualizeGroups = 8;
+const uint VisualizePages = 9;
+const uint VisualizeOverdraw = 10;
+/// The closure modes, from the material stage's buffers (Passes/Material/Closures.mshader).
+const uint VisualizeBaseColor = 11;
+const uint VisualizeShadingNormal = 12;
+const uint VisualizeRoughness = 13;
+const uint VisualizeMetallic = 14;
+const uint VisualizeClosures = 15;
+const uint VisualizeTileClass = 16;
+
+public struct SceneVisualizeArguments
+{
+    public Span<SceneViewData> View;
+    public Span<SceneInstance> Instances;
+    public Span<SceneCluster> Clusters;
+    public Ptr<byte> Geometry;
+    public Span<SceneVisibleCluster> Visible;
+    public Span<ulong> VisBuffer;
+    public Span<SceneMesh> Meshes;
+    public Span<SceneGroup> Groups;
+    public Span<uint> Overdraw;
+    /// The material stage's closures, for the closure modes; a word each otherwise.
+    public Span<uint> Headers;
+    public Span<uint> Plane;
+    public Span<uint> Records;
+    public Span<uint> TileFlags;
+    public Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f> Output;
+    public uint Mode;
+    /// The rasters' split (SceneRendererSubsystem::SoftwareRasterPixels), which the Raster mode shows.
+    public float SoftwarePixels;
+    public uint TilesX;
+}
+
+/// A closure mode's color for *pixel*.
+float3 ClosureColor(SceneVisualizeArguments args, uint pixel, uint2 at)
+{
+    if (args.Mode == VisualizeTileClass)
+    {
+        uint flags = args.TileFlags[(at.y / 8) * args.TilesX + at.x / 8];
+        float3 kind = (flags & 4) != 0 ? float3(0.9, 0.2, 0.15) : (flags & 2) != 0 ? float3(0.9, 0.8, 0.2)
+                                                                                   : float3(0.25, 0.8, 0.3);
+        return (flags & 1) != 0 ? kind : kind * 0.25;
+    }
+    uint header = args.Headers[pixel];
+    uint count = header & 7;
+    if (args.Mode == VisualizeClosures)
+    {
+        bool custom = count > 0 && (header & 8) == 0;
+        return custom ? float3(0.9, 0.2, 0.15) : HueToRgb(0.66 * (1.0 - Saturate(((float)count - 1.0) / 3.0))) *
+                                                     (count > 0 ? 1.0 : 0.0);
+    }
+    if ((header & 8) == 0)
+    {
+        // No Slab in the plane: nothing drawn, or a custom closure first.
+        return count > 0 ? float3(0.5, 0.0, 0.5) : float3(0.02, 0.02, 0.025);
+    }
+    uint p = pixel * 6;
+    if (args.Mode == VisualizeBaseColor)
+    {
+        uint w = args.Plane[p];
+        return float3((float)(w & 1023), (float)((w >> 10) & 1023), (float)((w >> 20) & 1023)) / 1023.0;
+    }
+    if (args.Mode == VisualizeShadingNormal)
+    {
+        uint w = args.Plane[p + 1];
+        return DecodeOctahedral(Snorm16(w, 0), Snorm16(w, 16)) * 0.5 + 0.5;
+    }
+    uint material = args.Plane[p + 2];
+    float value = args.Mode == VisualizeRoughness ? (float)(material & 255) / 255.0 : (float)((material >> 8) & 255) / 255.0;
+    return float3(value, value, value);
+}
+
+/// A hue on the color wheel, *hue* in turns.
+float3 HueToRgb(float hue)
+{
+    float h = hue - Floor(hue);
+    return Saturate(float3(Abs(h * 6.0 - 3.0) - 1.0, 2.0 - Abs(h * 6.0 - 2.0), 2.0 - Abs(h * 6.0 - 4.0)));
+}
+
+/// The LOD ramp of vk_lod_clusters: white for the source triangles, through cyan, to red for the coarsest level.
+float3 LodColor(float t)
+{
+    if (t <= 0.0)
+    {
+        return float3(1, 1, 1);
+    }
+    if (t < 0.15)
+    {
+        return float3(1, 1, 1) + (HueToRgb(0.5) - float3(1, 1, 1)) * (t / 0.15);
+    }
+    return HueToRgb(0.5 - (t - 0.15) / 0.85 * 0.5);
+}
+
+/// Fragments per pixel as heat: blue for one, through green and yellow, to red at 32 and more.
+float3 OverdrawColor(uint count)
+{
+    if (count == 0)
+    {
+        return float3(0, 0, 0);
+    }
+    float t = Saturate(Log2((float)count) / 5.0);
+    return HueToRgb(0.66 * (1.0 - t)) * (0.35 + 0.65 * t);
+}
+
+uint HashId(uint value)
+{
+    value ^= value >> 16;
+    value *= 2246822519;
+    value ^= value >> 13;
+    value *= 3266489917;
+    value ^= value >> 16;
+    return value;
+}
+
+float3 ColorOf(uint id)
+{
+    uint hash = HashId(id);
+    return float3((float)(hash & 255), (float)((hash >> 8) & 255), (float)((hash >> 16) & 255)) / 255 * 0.8 + 0.2;
+}
+
+/// The triangle's world-space normal; its winding decides the side.
+float3 TriangleNormal(SceneVisualizeArguments args, SceneViewData view, SceneVisibleCluster visible, uint triangle)
+{
+    SceneCluster cluster = args.Clusters[visible.Cluster];
+    SceneInstance instance = args.Instances[visible.Instance];
+    uint3 corners = LoadTriangle(args.Geometry, cluster, triangle);
+    float3 a = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, corners.x));
+    float3 b = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, corners.y));
+    float3 c = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, corners.z));
+    return Normalize(Cross(b - a, c - a));
+}
+
+[Compute(8, 8, 1)]
+void VisualizeVisBuffer([DispatchThreadId] uint3 id, [Uniform] in SceneVisualizeArguments args)
+{
+    SceneViewData view = args.View[0];
+    if (id.x >= view.Width || id.y >= view.Height)
+    {
+        return;
+    }
+    ulong value = args.VisBuffer[id.y * view.Width + id.x];
+    float3 color = float3(0.02, 0.02, 0.025);
+    if (args.Mode >= VisualizeBaseColor)
+    {
+        color = ClosureColor(args, id.y * view.Width + id.x, id.xy);
+    }
+    else if (args.Mode == VisualizeOverdraw)
+    {
+        // Every fragment the rasters wrote, the hidden ones too.
+        color = OverdrawColor(args.Overdraw[id.y * view.Width + id.x]);
+    }
+    else if (value != 0ul)
+    {
+        uint payload = (uint)(value & 4294967295ul);
+        float depth = AsFloat((uint)(value >> 32));
+        uint visibleIndex = payload >> TriangleBits;
+        uint triangle = payload & TriangleMask;
+        SceneVisibleCluster visible = args.Visible[visibleIndex];
+        if (args.Mode == VisualizeInstances)
+        {
+            color = ColorOf(visible.Instance);
+        }
+        else if (args.Mode == VisualizeClusters)
+        {
+            color = ColorOf(visible.Cluster);
+        }
+        else if (args.Mode == VisualizeTriangles)
+        {
+            color = ColorOf(visible.Cluster * 128 + triangle);
+        }
+        else if (args.Mode == VisualizeDepth)
+        {
+            // Near over distance: 1 at the near plane, falling off with distance; a square root spreads it out.
+            color = float3(Sqrt(Saturate(depth)));
+        }
+        else
+        {
+            float3 normal = TriangleNormal(args, view, visible, triangle);
+            // A light at the camera: both sides of a triangle lit alike.
+            float light = 0.15 + 0.85 * Abs(Dot(normal, view.Forward.xyz));
+            SceneCluster cluster = args.Clusters[visible.Cluster];
+            SceneInstance instance = args.Instances[visible.Instance];
+            SceneMesh mesh = args.Meshes[instance.Mesh];
+            if (args.Mode == VisualizeNormals)
+            {
+                color = normal * 0.5 + 0.5;
+            }
+            else if (args.Mode == VisualizeLod)
+            {
+                // The cluster's own group's level of the mesh's levels: the LOD the traversal picked.
+                uint level = args.Groups[mesh.FirstGroup + cluster.Group].Depth;
+                float t = mesh.DepthCount > 1 ? (float)level / (float)(mesh.DepthCount - 1) : 0.0;
+                color = LodColor(t) * (0.3 + 0.7 * light);
+            }
+            else if (args.Mode == VisualizeRaster)
+            {
+                // Green where the software raster drew, red where the hardware did: the culling's own test.
+                float4 sphere = ToViewSphere(instance, view, cluster.Sphere);
+                bool software =
+                    IsSoftwareRaster(view, sphere, cluster.MaxEdgeLength * MaxScale(instance), args.SoftwarePixels);
+                color = (software ? float3(0.2, 0.85, 0.3) : float3(0.9, 0.25, 0.2)) * (0.3 + 0.7 * light);
+            }
+            else if (args.Mode == VisualizeGroups)
+            {
+                color = ColorOf(mesh.FirstGroup + cluster.Group) * (0.3 + 0.7 * light);
+            }
+            else if (args.Mode == VisualizePages)
+            {
+                // A page is the clusters of one slot of the streaming pool.
+                color = ColorOf(visible.Cluster / SlotClusters) * (0.3 + 0.7 * light);
+            }
+            else
+            {
+                color = float3(light);
+            }
+        }
+    }
+    args.Output.Store(int2((int)id.x, (int)id.y), float4(color, 1));
+}

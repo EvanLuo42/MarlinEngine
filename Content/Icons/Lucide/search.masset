@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "f45e7e7f-e544-588c-a096-127c5c0f4af2"
+    !Name = "search"
+    SourceFile = `source:search.svg#ad12aa71-e0b9-4c20-83b8-4339f009929d`
+}

@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "827b609e-435a-5ad6-83bd-62b8fa3dbdd0"
+    !Name = "bug"
+    SourceFile = `source:bug.svg#e3729141-b387-43aa-89a3-5e726c34e9c5`
+}

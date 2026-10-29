@@ -1,0 +1,71 @@
+/// The ECS as scripts see it (Documentation/Architecture/05, MarlinScript §11.2): components, systems and the
+/// entities of the world the script runs in.
+namespace Marlin;
+
+/// Makes a struct an ECS component: it registers with the world's component registry under its qualified name, and
+/// entities hold it in their chunks like a C++ component. Its fields are numbers, bools, enums, `Entity`, the vectors
+/// float2..4 and int2..3, and structs of those.
+[Attribute(AttributeTargets.Struct)]
+public struct ComponentAttribute
+{
+}
+
+/// Makes a function an ECS system, scheduled with the C++ systems of its phase. Its parameters are `ref` (written)
+/// and `in` (read) components and an optional `Entity`; it runs once per entity that has all of the components, or
+/// once per run if it takes none. Phase, Sets, UpdateAfter and UpdateBefore name types as in C++ (`MCLASS(...)`):
+/// Phase defaults to GameplayPhase and Sets to GameplaySet; several names are separated by commas.
+[Attribute(AttributeTargets.Function)]
+public struct SystemAttribute
+{
+    public string Phase;
+    public string Sets;
+    public string UpdateAfter;
+    public string UpdateBefore;
+}
+
+/// An entity of the world: an index and a generation. The default, with generation 0, is no entity.
+public struct Entity : IEquatable<Entity>
+{
+    public uint Index;
+    public uint Generation;
+
+    public bool IsNull => Generation == 0;
+    /// Made in a system and created when its phase ends: components can be set on it until then.
+    public bool IsDeferred => Generation == 0xFFFFFFFFu;
+
+    public bool Equals(Entity other) => Index == other.Index && Generation == other.Generation;
+    public int GetHashCode() => (int)(Index * 0x9E3779B1u ^ Generation);
+
+    /// True if the entity exists.
+    [Native("Entity.IsAlive")] public bool IsAlive();
+    /// Destroys the entity; while systems run, when the phase ends.
+    [Native("Entity.Destroy")] public void Destroy();
+
+    /// True if the entity has a component *T*.
+    public bool Has<T>() => HasComponent(default(T));
+    /// The value of the entity's component *T*; a `Panic` fault if it has none.
+    [Native("Entity.Get")] public T Get<T>();
+    /// Adds component *T* with *value*, or replaces its value; while systems run, when the phase ends.
+    [Native("Entity.Set")] public void Set<T>(T value);
+    /// Removes component *T* if the entity has one; while systems run, when the phase ends.
+    public void Remove<T>() => RemoveComponent(default(T));
+
+    // The component type of these is that of the argument, whose value is not used.
+    [Native("Entity.Has")] internal bool HasComponent<T>(T type);
+    [Native("Entity.Remove")] internal void RemoveComponent<T>(T type);
+}
+
+/// The entities of the world the script runs in.
+public static class Entities
+{
+    /// A new entity without components; while systems run it is deferred (`Entity.IsDeferred`) until the phase ends.
+    [Native("Entities.Create")] public static Entity Create();
+}
+
+/// The time of the world the script runs in.
+public static class Time
+{
+    /// Seconds the current step covers: the fixed step in a system of the Fixed stage, the frame's delta otherwise.
+    /// It is 0 while the world is paused.
+    [Native("Time.Delta")] public static float Delta { get; }
+}

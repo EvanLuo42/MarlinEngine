@@ -1,0 +1,8 @@
+Family: Noto Sans
+Version: 2.015 (tag NotoSans-v2.015)
+Release: https://github.com/notofonts/latin-greek-cyrillic/releases/tag/NotoSans-v2.015
+Archive: https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSans-v2.015/NotoSans-v2.015.zip
+Archive SHA-256: 0c34df072a3fa7efbb7cbf34950e1f971a4447cffe365d3a359e2d4089b958f5
+Files: NotoSans/hinted/ttf/NotoSans-Regular.ttf, NotoSans/hinted/ttf/NotoSans-Bold.ttf,
+       OFL.txt (as LICENSE.txt)
+License: OFL-1.1

@@ -1,0 +1,607 @@
+/// The core library of the shader dialect (MarlinLanguage.md §9.10).
+namespace Marlin;
+
+/// The stages a declaration may be used in (§9.7, §9.10).
+[Flags]
+public enum ShaderStage : uint
+{
+    Compute = 1,
+    Amplification = 2,
+    Mesh = 4,
+    Vertex = 8,
+    Pixel = 16,
+    RayGeneration = 32,
+    ClosestHit = 64,
+    AnyHit = 128,
+    Miss = 256,
+    Intersection = 512,
+    Callable = 1024,
+    Group = Compute | Amplification | Mesh,
+    RayTracing = RayGeneration | ClosestHit | AnyHit | Miss | Intersection | Callable,
+}
+
+/// Compile-time text: `nameof`, feature names and `Debug.Print` formats.
+[Builtin("String")] public struct string {}
+
+/// A device capability outside the hardware baseline (§9.7), identified by name.
+[Builtin("Feature")]
+public struct Feature
+{
+    [CompileTime("FeatureFromName")] public Feature(string name);
+}
+
+public struct Compiler
+{
+    /// A 16-bit ID of the struct *T* from its qualified name, never zero, the same in every compilation: what a custom
+    /// BSDF's closures are tagged with (07 §4.3).
+    [CompileTime("TypeId")] public static uint TypeId<T>();
+    /// Requires *condition* to be true once the code is inlined and folded, for properties the code must have at
+    /// compile time though they are computed, such as a Surface's shape (§9.4); reports *message* otherwise.
+    [Intrinsic("Require")] public static void Require(bool condition, string message);
+    /// The scalars of *value* as 32-bit words in field and component order, the rest zero; FromWords reads them back.
+    /// A value with more scalars than words, or anything but scalars of 32 bits or less, is an error.
+    [Intrinsic("ToWords")] public static uint[8] ToWords<T>(T value);
+    [Intrinsic("FromWords")] public static T FromWords<T>(uint[8] words);
+}
+
+public struct Device
+{
+    /// Whether the profile being compiled has *feature*; a constant in every profile.
+    [CompileTime("DeviceSupports")] public static bool Supports(Feature feature);
+}
+
+public enum MeshTopology : uint { Point, Line, Triangle }
+
+/// The storage format of a writable texture, its third type argument (§4.4); Inferred picks it from the texel type.
+public enum ImageFormat : uint
+{
+    Inferred = 0,
+    Rgba32f = 1,
+    Rgba16f,
+    Rg32f,
+    Rg16f,
+    R11g11b10f,
+    R32f,
+    R16f,
+    Rgba16Unorm,
+    Rgb10a2Unorm,
+    Rgba8Unorm,
+    Rg16Unorm,
+    Rg8Unorm,
+    R16Unorm,
+    R8Unorm,
+    Rgba16Snorm,
+    Rgba8Snorm,
+    Rg16Snorm,
+    Rg8Snorm,
+    R16Snorm,
+    R8Snorm,
+    Rgba32i,
+    Rgba16i,
+    Rgba8i,
+    Rg32i,
+    Rg16i,
+    Rg8i,
+    R32i,
+    R16i,
+    R8i,
+    R64i,
+    Rgba32u,
+    Rgba16u,
+    Rgba8u,
+    Rg32u,
+    Rg16u,
+    Rg8u,
+    R32u,
+    R16u,
+    R8u,
+    R64u,
+}
+
+[Builtin("Sampler")] public struct Sampler {}
+[Builtin("ComparisonSampler")] public struct ComparisonSampler {}
+
+/// Who may read and write through a texture, Ptr or Span (§4.4, §4.5).
+public enum Access : uint { Read, Write, ReadWrite }
+
+// Textures (§4.4): the shape is the type name, the access and the storage format are type arguments, so a writable
+// texture is `Texture2D<float4, Access.ReadWrite, ImageFormat.Rgba16f>`. Sampling needs Access.Read; Store needs Write
+// or ReadWrite. Size is mip 0; GetSize(mip) any other.
+
+[Builtin("Texture1D")]
+public struct Texture1D<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float u);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float u, float lod);
+    [Intrinsic("SampleGrad")] public T SampleGrad(Sampler s, float u, float ddx, float ddy);
+    [Intrinsic("TextureLoad")] public T Load(int position, int mip = 0);
+    [Intrinsic("TextureStore")] public void Store(int position, T value);
+    [Intrinsic("TextureDimensions")] public uint Size { get; }
+    [Intrinsic("TextureDimensions")] public uint GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+[Builtin("Texture1DArray")]
+public struct Texture1DArray<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float2 uLayer);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float2 uLayer, float lod);
+    [Intrinsic("TextureLoad")] public T Load(int2 positionLayer, int mip = 0);
+    [Intrinsic("TextureStore")] public void Store(int2 positionLayer, T value);
+    [Intrinsic("TextureDimensions")] public uint2 Size { get; }
+    [Intrinsic("TextureDimensions")] public uint2 GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+[Builtin("Texture2D")]
+public struct Texture2D<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float2 uv);
+    [Intrinsic("SampleBias"), Stage(ShaderStage.Pixel)] public T SampleBias(Sampler s, float2 uv, float bias);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float2 uv, float lod);
+    [Intrinsic("SampleGrad")] public T SampleGrad(Sampler s, float2 uv, float2 ddx, float2 ddy);
+    [Intrinsic("SampleCmp"), Stage(ShaderStage.Pixel)]
+    public float SampleCompare(ComparisonSampler s, float2 uv, float reference);
+    [Intrinsic("SampleCmpLevel")] public float SampleCompareLevel(ComparisonSampler s, float2 uv, float reference, float lod);
+    [Intrinsic("Gather")] public Vector<ScalarOf<T>, 4> Gather(Sampler s, float2 uv, int component = 0);
+    [Intrinsic("GatherCmp")] public float4 GatherCompare(ComparisonSampler s, float2 uv, float reference);
+    [Intrinsic("CalculateLod"), Stage(ShaderStage.Pixel)] public float CalculateLod(Sampler s, float2 uv);
+    [Intrinsic("TextureLoad")] public T Load(int2 position, int mip = 0);
+    [Intrinsic("TextureStore")] public void Store(int2 position, T value);
+    [Intrinsic("TextureDimensions")] public uint2 Size { get; }
+    [Intrinsic("TextureDimensions")] public uint2 GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+[Builtin("Texture2DArray")]
+public struct Texture2DArray<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float3 uvLayer);
+    [Intrinsic("SampleBias"), Stage(ShaderStage.Pixel)] public T SampleBias(Sampler s, float3 uvLayer, float bias);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float3 uvLayer, float lod);
+    [Intrinsic("SampleGrad")] public T SampleGrad(Sampler s, float3 uvLayer, float2 ddx, float2 ddy);
+    [Intrinsic("SampleCmp"), Stage(ShaderStage.Pixel)]
+    public float SampleCompare(ComparisonSampler s, float3 uvLayer, float reference);
+    [Intrinsic("SampleCmpLevel")]
+    public float SampleCompareLevel(ComparisonSampler s, float3 uvLayer, float reference, float lod);
+    [Intrinsic("Gather")] public Vector<ScalarOf<T>, 4> Gather(Sampler s, float3 uvLayer, int component = 0);
+    [Intrinsic("TextureLoad")] public T Load(int3 positionLayer, int mip = 0);
+    [Intrinsic("TextureStore")] public void Store(int3 positionLayer, T value);
+    [Intrinsic("TextureDimensions")] public uint3 Size { get; }
+    [Intrinsic("TextureDimensions")] public uint3 GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+[Builtin("Texture2DMultisample")]
+public struct Texture2DMultisample<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred>
+    where T : IScalarOrVector
+{
+    [Intrinsic("TextureLoad")] public T Load(int2 position, int sample);
+    [Intrinsic("TextureDimensions")] public uint2 Size { get; }
+    [Intrinsic("TextureSamples")] public uint SampleCount { get; }
+}
+
+[Builtin("Texture3D")]
+public struct Texture3D<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float3 uvw);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float3 uvw, float lod);
+    [Intrinsic("SampleGrad")] public T SampleGrad(Sampler s, float3 uvw, float3 ddx, float3 ddy);
+    [Intrinsic("TextureLoad")] public T Load(int3 position, int mip = 0);
+    [Intrinsic("TextureStore")] public void Store(int3 position, T value);
+    [Intrinsic("TextureDimensions")] public uint3 Size { get; }
+    [Intrinsic("TextureDimensions")] public uint3 GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+[Builtin("TextureCube")]
+public struct TextureCube<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float3 direction);
+    [Intrinsic("SampleBias"), Stage(ShaderStage.Pixel)] public T SampleBias(Sampler s, float3 direction, float bias);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float3 direction, float lod);
+    [Intrinsic("SampleGrad")] public T SampleGrad(Sampler s, float3 direction, float3 ddx, float3 ddy);
+    [Intrinsic("SampleCmpLevel")]
+    public float SampleCompareLevel(ComparisonSampler s, float3 direction, float reference, float lod);
+    [Intrinsic("Gather")] public Vector<ScalarOf<T>, 4> Gather(Sampler s, float3 direction, int component = 0);
+    [Intrinsic("TextureDimensions")] public uint2 Size { get; }
+    [Intrinsic("TextureDimensions")] public uint2 GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+[Builtin("TextureCubeArray")]
+public struct TextureCubeArray<T, Access A = Access.Read, ImageFormat F = ImageFormat.Inferred> where T : IScalarOrVector
+{
+    [Intrinsic("Sample"), Stage(ShaderStage.Pixel)] public T Sample(Sampler s, float4 directionLayer);
+    [Intrinsic("SampleLevel")] public T SampleLevel(Sampler s, float4 directionLayer, float lod);
+    [Intrinsic("TextureDimensions")] public uint3 Size { get; }
+    [Intrinsic("TextureDimensions")] public uint3 GetSize(uint mip);
+    [Intrinsic("TextureLevels")] public uint MipCount { get; }
+}
+
+/// The element of `Ptr<byte>`, which reads and writes values at byte offsets (§4.5); it has no arithmetic.
+[Builtin("Byte")] public struct byte {}
+
+/// The device address of a T in GPU memory (§4.5). `p[i]` and `p.Value` (`p[0]`) are references to its elements; a
+/// pointer has no length, so reading past what it points at is undefined.
+[Builtin("Ptr")]
+public struct Ptr<T, Access A = Access.Read>
+{
+    [Intrinsic("PtrIsNull")] public bool IsNull { get; }
+    /// The pointer *bytes* further on, which must keep T aligned.
+    [Intrinsic("PtrOffset")] public Ptr<T, A> Offset(uint bytes);
+    /// The same address as a pointer to U; the caller makes sure it is aligned for U.
+    [Intrinsic("PtrCast")] public Ptr<U, A> Cast<U>();
+    /// The U at byte *offset* of a `Ptr<byte>`, which must be aligned to U (§10).
+    [Intrinsic("PtrRead")] public U Read<U>(uint offset);
+    [Intrinsic("PtrWrite")] public void Write<U>(uint offset, U value);
+    /// The pointer *count* elements further on.
+    [Intrinsic("PtrAdd")] public static Ptr<T, A> operator +(Ptr<T, A> pointer, uint count);
+    /// Whether two pointers hold the same address.
+    [Intrinsic("PtrEqual")] public static bool operator ==(Ptr<T, A> a, Ptr<T, A> b);
+    [Intrinsic("PtrNotEqual")] public static bool operator !=(Ptr<T, A> a, Ptr<T, A> b);
+}
+
+/// A Ptr and the number of elements it points at (§4.5): `s[i]` clamps i to the last element, as arrays do (§4.3).
+/// 16 bytes in GPU memory.
+[Builtin("Span")]
+public struct Span<T, Access A = Access.Read>
+{
+    public Ptr<T, A> Pointer;
+    public uint Length;
+
+    public Span(Ptr<T, A> pointer, uint length) { Pointer = pointer; Length = length; }
+
+    /// The *count* elements from *start* on.
+    public Span<T, A> Slice(uint start, uint count) => new Span<T, A>(Pointer + start, count);
+}
+
+public struct Atomic
+{
+    [Intrinsic("AtomicLoad")] public static T Load<T>(ref T target) where T : IInteger, IScalar;
+    [Intrinsic("AtomicStore")] public static void Store<T>(ref T target, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicExchange")] public static T Exchange<T>(ref T target, T value) where T : IInteger, IScalar;
+    /// Stores *value* if *target* holds *comparand*; returns what *target* held.
+    [Intrinsic("AtomicCompareExchange")] public static T CompareExchange<T>(ref T target, T comparand, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicAdd")] public static T Add<T>(ref T target, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicMin")] public static T Min<T>(ref T target, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicMax")] public static T Max<T>(ref T target, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicAnd")] public static T And<T>(ref T target, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicOr")] public static T Or<T>(ref T target, T value) where T : IInteger, IScalar;
+    [Intrinsic("AtomicXor")] public static T Xor<T>(ref T target, T value) where T : IInteger, IScalar;
+}
+
+/// Debug output (§9.11): generates code only when the compile options enable it.
+public struct Debug
+{
+    /// Prints *format* with `{n}` replaced by argument n; the format must be a constant.
+    [Intrinsic("DebugPrint")] public static void Print(string format);
+    [Intrinsic("DebugPrint")] public static void Print<T0>(string format, T0 a0) where T0 : IScalarOrVector;
+    [Intrinsic("DebugPrint")]
+    public static void Print<T0, T1>(string format, T0 a0, T1 a1) where T0 : IScalarOrVector where T1 : IScalarOrVector;
+    [Intrinsic("DebugPrint")]
+    public static void Print<T0, T1, T2>(string format, T0 a0, T1 a1, T2 a2)
+        where T0 : IScalarOrVector where T1 : IScalarOrVector where T2 : IScalarOrVector;
+    [Intrinsic("DebugPrint")]
+    public static void Print<T0, T1, T2, T3>(string format, T0 a0, T1 a1, T2 a2, T3 a3)
+        where T0 : IScalarOrVector where T1 : IScalarOrVector where T2 : IScalarOrVector where T3 : IScalarOrVector;
+    /// Prints `file:line: assertion failed: message` when *condition* is false; execution continues.
+    [Intrinsic("DebugAssert")] public static void Assert(bool condition, string message);
+}
+
+// RECOVERY-DECISION lang-files-D3: DifferentialPair lives in the shader core library (only shader backends
+// differentiate); `Autodiff.Forward` / `Autodiff.Backward` / `Autodiff.Detach`, `[Differentiable]`, `[NoDiff]`,
+// `[ForwardDerivative]`, `[ForwardDerivative2]`, `[BackwardDerivative]` and `[MaxIterations]` are compiler-known names.
+/// A type whose values have derivatives (§9.12). The compiler decides which types conform: floating-point scalars,
+/// vectors and matrices, arrays of them, and structs whose fields are differentiable or `[NoDiff]` (with at least one
+/// that is not). A struct may say `: IDifferentiable` to have that checked; nothing else implements it.
+[Builtin("IDifferentiable")]
+public interface IDifferentiable
+{
+    /// The type of a derivative. Every differentiable type is its own Differential; the `[NoDiff]` fields of a
+    /// struct, and its other fields without derivatives, are zero in it.
+    type Differential : IDifferentiable;
+    /// The zero derivative.
+    static abstract Differential DifferentialZero { get; }
+    /// The sum of two derivatives, as where a value is used twice.
+    static abstract Differential DifferentialAdd(Differential a, Differential b);
+    /// A derivative times a scalar.
+    static abstract Differential DifferentialScale(Differential d, float s);
+}
+
+/// What the compiler implements IDifferentiable with: the requirements, field by field for a struct.
+public extension<T> T where T : IDifferentiable
+{
+    public type Differential = T;
+    public static T DifferentialZero => default(T);
+    [Intrinsic("DifferentialAdd")] public static T DifferentialAdd(T a, T b);
+    [Intrinsic("DifferentialScale")] public static T DifferentialScale(T d, float s);
+}
+
+/// A value and its derivative (§9.12): what `Autodiff.Forward` takes and returns, and what `Autodiff.Backward` takes by
+/// `ref` to receive a gradient, and what custom derivatives take for each differentiable parameter.
+public struct DifferentialPair<T> where T : IDifferentiable
+{
+    public T Primal;
+    public T.Differential Differential;
+    public DifferentialPair(T primal, T.Differential differential) { Primal = primal; Differential = differential; }
+}
+
+/// A value and its derivatives along two directions at once, such as screen x and y: what `Autodiff.Forward` takes and
+/// returns in two-direction forward mode, and what a `[ForwardDerivative2]` takes for each differentiable parameter
+/// (§9.12). Every rule is linear in the derivative, so both are carried through one evaluation.
+public struct DifferentialPair2<T> where T : IDifferentiable
+{
+    public T Primal;
+    public T.Differential Dx;
+    public T.Differential Dy;
+    public DifferentialPair2(T primal, T.Differential dx, T.Differential dy) { Primal = primal; Dx = dx; Dy = dy; }
+}
+
+public struct Barrier
+{
+    /// Waits for the group and makes its groupshared writes visible.
+    [Intrinsic("GroupBarrier"), Stage(ShaderStage.Group)] public static void Group();
+    [Intrinsic("GroupMemoryBarrier"), Stage(ShaderStage.Group)] public static void GroupMemory();
+    [Intrinsic("DeviceMemoryBarrier")] public static void DeviceMemory();
+    [Intrinsic("AllMemoryBarrier")] public static void AllMemory();
+}
+
+public struct Wave
+{
+    [SystemValue("WaveLaneIndex")] public static uint LaneIndex { get; }
+    [SystemValue("WaveLaneCount")] public static uint LaneCount { get; }
+    [Intrinsic("WaveIsFirstLane")] public static bool IsFirstLane();
+    [Intrinsic("WaveActiveAllTrue")] public static bool ActiveAllTrue(bool condition);
+    [Intrinsic("WaveActiveAnyTrue")] public static bool ActiveAnyTrue(bool condition);
+    [Intrinsic("WaveActiveAllEqual")] public static bool ActiveAllEqual<T>(T value) where T : IScalar;
+    [Intrinsic("WaveActiveBallot")] public static uint4 ActiveBallot(bool condition);
+    [Intrinsic("WaveReadLaneAt")] public static T ReadLaneAt<T>(T value, uint lane) where T : IScalarOrVector;
+    [Intrinsic("WaveReadFirstLane")] public static T ReadFirstLane<T>(T value) where T : IScalarOrVector;
+    [Intrinsic("WaveActiveSum")] public static T ActiveSum<T>(T value) where T : INumeric;
+    [Intrinsic("WaveActiveProduct")] public static T ActiveProduct<T>(T value) where T : INumeric;
+    [Intrinsic("WaveActiveMin")] public static T ActiveMin<T>(T value) where T : INumeric;
+    [Intrinsic("WaveActiveMax")] public static T ActiveMax<T>(T value) where T : INumeric;
+    [Intrinsic("WaveActiveBitAnd")] public static T ActiveBitAnd<T>(T value) where T : IInteger;
+    [Intrinsic("WaveActiveBitOr")] public static T ActiveBitOr<T>(T value) where T : IInteger;
+    [Intrinsic("WaveActiveBitXor")] public static T ActiveBitXor<T>(T value) where T : IInteger;
+    [Intrinsic("WaveActiveCountBits")] public static uint ActiveCountBits(bool condition);
+    [Intrinsic("WavePrefixSum")] public static T PrefixSum<T>(T value) where T : INumeric;
+    [Intrinsic("WavePrefixProduct")] public static T PrefixProduct<T>(T value) where T : INumeric;
+    [Intrinsic("WavePrefixCountBits")] public static uint PrefixCountBits(bool condition);
+}
+
+/// Screen-space derivatives across a 2x2 pixel quad (§9.10); pixel stage only.
+public struct Derivative
+{
+    [Intrinsic("Ddx"), Stage(ShaderStage.Pixel)] public static T X<T>(T x) where T : IFloatingPoint;
+    [Intrinsic("Ddy"), Stage(ShaderStage.Pixel)] public static T Y<T>(T x) where T : IFloatingPoint;
+    [Intrinsic("DdxFine"), Stage(ShaderStage.Pixel)] public static T XFine<T>(T x) where T : IFloatingPoint;
+    [Intrinsic("DdyFine"), Stage(ShaderStage.Pixel)] public static T YFine<T>(T x) where T : IFloatingPoint;
+    [Intrinsic("DdxCoarse"), Stage(ShaderStage.Pixel)] public static T XCoarse<T>(T x) where T : IFloatingPoint;
+    [Intrinsic("DdyCoarse"), Stage(ShaderStage.Pixel)] public static T YCoarse<T>(T x) where T : IFloatingPoint;
+    /// Abs(X(x)) + Abs(Y(x)).
+    [Intrinsic("Fwidth"), Stage(ShaderStage.Pixel)] public static T Width<T>(T x) where T : IFloatingPoint;
+}
+
+/// The vertices a mesh shader writes (§9.2).
+[Builtin("Vertices")] public struct Vertices<V, int N> {}
+/// The indices of each primitive a mesh shader writes: uint for points, uint2 for lines, uint3 for triangles.
+[Builtin("Indices")] public struct Indices<T, int N> {}
+/// The per-primitive values a mesh shader writes.
+[Builtin("Primitives")] public struct Primitives<P, int N> {}
+
+[Intrinsic("SetMeshOutputCounts"), Stage(ShaderStage.Mesh)] public void SetMeshOutputCounts(uint vertices, uint primitives);
+/// Ends the amplification stage, launching x * y * z mesh groups with *payload*.
+[Intrinsic("EmitMeshTasks"), Stage(ShaderStage.Amplification)] public void DispatchMesh<P>(uint x, uint y, uint z, P payload);
+
+[Flags]
+public enum RayFlags : uint
+{
+    None = 0,
+    ForceOpaque = 1,
+    ForceNonOpaque = 2,
+    AcceptFirstHitAndEndSearch = 4,
+    SkipClosestHitShader = 8,
+    CullBackFacingTriangles = 16,
+    CullFrontFacingTriangles = 32,
+    CullOpaque = 64,
+    CullNonOpaque = 128,
+    SkipTriangles = 256,
+    SkipProceduralPrimitives = 512,
+}
+
+public struct RayDesc
+{
+    public float3 Origin;
+    public float TMin;
+    public float3 Direction;
+    public float TMax;
+}
+
+/// The barycentrics of a triangle hit.
+[HitAttributes]
+public struct TriangleAttributes
+{
+    public float2 Barycentrics;
+}
+
+[Builtin("AccelerationStructure")] public struct AccelerationStructure {}
+
+public struct Launch
+{
+    [SystemValue("LaunchIndex"), Stage(ShaderStage.RayTracing)] public static uint3 Index { get; }
+    [SystemValue("LaunchSize"), Stage(ShaderStage.RayTracing)] public static uint3 Size { get; }
+}
+
+public struct Hit
+{
+    [SystemValue("RayTCurrent"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection | ShaderStage.Miss)] public static float T { get; }
+    [SystemValue("RayTMin"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection | ShaderStage.Miss)] public static float RayTMin { get; }
+    [SystemValue("HitKind"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit)] public static uint Kind { get; }
+    [SystemValue("IncomingRayFlags"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection | ShaderStage.Miss)] public static uint RayFlags { get; }
+    [SystemValue("InstanceIndexRt"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static uint InstanceIndex { get; }
+    [SystemValue("InstanceId"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static uint InstanceId { get; }
+    [SystemValue("GeometryIndex"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static uint GeometryIndex { get; }
+    [SystemValue("PrimitiveIndexRt"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static uint PrimitiveIndex { get; }
+    [SystemValue("ObjectToWorld"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static float3x4 ObjectToWorld { get; }
+    [SystemValue("WorldToObject"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static float3x4 WorldToObject { get; }
+    [SystemValue("WorldRayOrigin"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection | ShaderStage.Miss)] public static float3 WorldRayOrigin { get; }
+    [SystemValue("WorldRayDirection"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection | ShaderStage.Miss)] public static float3 WorldRayDirection { get; }
+    [SystemValue("ObjectRayOrigin"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static float3 ObjectRayOrigin { get; }
+    [SystemValue("ObjectRayDirection"), Stage(ShaderStage.ClosestHit | ShaderStage.AnyHit | ShaderStage.Intersection)] public static float3 ObjectRayDirection { get; }
+}
+
+[Intrinsic("TraceRay"), Stage(ShaderStage.RayGeneration | ShaderStage.ClosestHit | ShaderStage.Miss)]
+public void TraceRay<P>(AccelerationStructure scene, RayDesc ray, ref P payload, RayFlags flags = RayFlags.None, uint mask = 0xFF,
+                        uint hitGroupOffset = 0, uint hitGroupStride = 1, uint missIndex = 0);
+[Intrinsic("CallShader"), Stage(ShaderStage.RayGeneration | ShaderStage.ClosestHit | ShaderStage.Miss | ShaderStage.Callable)]
+public void CallShader<D>(uint index, ref D data);
+[Intrinsic("ReportHit"), Stage(ShaderStage.Intersection)] public bool ReportHit<A>(float t, uint kind, A attributes);
+[Intrinsic("IgnoreHit"), Stage(ShaderStage.AnyHit)] public void IgnoreHit();
+[Intrinsic("AcceptHitAndEndSearch"), Stage(ShaderStage.AnyHit)] public void AcceptHitAndEndSearch();
+
+public enum CommittedStatus : uint { Nothing, Triangle, Procedural }
+public enum CandidateType : uint { Triangle, Procedural }
+
+/// An inline ray traversal (§4.5); a local value only.
+[Builtin("RayQuery")]
+public struct RayQuery<RayFlags Flags>
+{
+    [Intrinsic("RayQueryInitialize")] public void TraceRayInline(AccelerationStructure scene, RayFlags flags, uint mask, RayDesc ray);
+    [Intrinsic("RayQueryProceed")] public bool Proceed();
+    [Intrinsic("RayQueryAbort")] public void Abort();
+    [Intrinsic("RayQueryConfirmIntersection")] public void CommitNonOpaqueTriangleHit();
+    [Intrinsic("RayQueryGenerateIntersection")] public void CommitProceduralPrimitiveHit(float t);
+    [Intrinsic("RayQueryGet", 0)] public CommittedStatus CommittedStatus();
+    [Intrinsic("RayQueryGet", 1)] public CandidateType CandidateType();
+    [Intrinsic("RayQueryGet", 2)] public float CommittedRayT();
+    [Intrinsic("RayQueryGet", 3)] public float CandidateTriangleRayT();
+    [Intrinsic("RayQueryGet", 4)] public uint CommittedInstanceIndex();
+    [Intrinsic("RayQueryGet", 5)] public uint CommittedInstanceId();
+    [Intrinsic("RayQueryGet", 6)] public uint CommittedGeometryIndex();
+    [Intrinsic("RayQueryGet", 7)] public uint CommittedPrimitiveIndex();
+    [Intrinsic("RayQueryGet", 8)] public float2 CommittedTriangleBarycentrics();
+    [Intrinsic("RayQueryGet", 9)] public bool CommittedTriangleFrontFace();
+    [Intrinsic("RayQueryGet", 10)] public float3x4 CommittedObjectToWorld();
+    [Intrinsic("RayQueryGet", 11)] public uint CandidateInstanceIndex();
+    [Intrinsic("RayQueryGet", 12)] public uint CandidatePrimitiveIndex();
+    [Intrinsic("RayQueryGet", 13)] public float2 CandidateTriangleBarycentrics();
+    /// The committed hit as a hit object that shades with shader table record *shaderTableIndex* (§9.8).
+    [Intrinsic("HitObjectFromRayQuery"), Requires(Features.ShaderExecutionReorder)]
+    public HitObject CommittedHitObject(uint shaderTableIndex);
+}
+
+/// A traversal result kept for shading later, after ReorderThread (SER, §9.8); a local variable only.
+[Builtin("HitObject")]
+public struct HitObject
+{
+    /// Traverses without running hit or miss shaders.
+    [Intrinsic("HitObjectTraceRay"), Stage(ShaderStage.RayGeneration | ShaderStage.ClosestHit | ShaderStage.Miss),
+     Requires(Features.ShaderExecutionReorder)]
+    public static HitObject TraceRay<P>(AccelerationStructure scene, RayDesc ray, ref P payload,
+                                        RayFlags flags = RayFlags.None, uint mask = 0xFF, uint hitGroupOffset = 0,
+                                        uint hitGroupStride = 1, uint missIndex = 0);
+    [Intrinsic("HitObjectMakeMiss"), Requires(Features.ShaderExecutionReorder)]
+    public static HitObject MakeMiss(uint missIndex, RayDesc ray);
+    [Intrinsic("HitObjectMakeNop"), Requires(Features.ShaderExecutionReorder)] public static HitObject MakeNop();
+    /// Runs the closest hit or miss shader of the hit object with *payload*.
+    [Intrinsic("HitObjectInvoke"), Stage(ShaderStage.RayGeneration | ShaderStage.ClosestHit | ShaderStage.Miss),
+     Requires(Features.ShaderExecutionReorder)]
+    public void Invoke<P>(ref P payload);
+    [Intrinsic("HitObjectGet", 0)] public bool IsHit();
+    [Intrinsic("HitObjectGet", 1)] public bool IsMiss();
+    [Intrinsic("HitObjectGet", 2)] public bool IsNop();
+    [Intrinsic("HitObjectGet", 3)] public uint InstanceIndex();
+    [Intrinsic("HitObjectGet", 4)] public uint InstanceId();
+    [Intrinsic("HitObjectGet", 5)] public uint GeometryIndex();
+    [Intrinsic("HitObjectGet", 6)] public uint PrimitiveIndex();
+    [Intrinsic("HitObjectGet", 7)] public uint HitKind();
+    [Intrinsic("HitObjectGet", 8)] public float HitT();
+    [Intrinsic("HitObjectGet", 9)] public float RayTMin();
+    [Intrinsic("HitObjectGet", 10)] public uint TraversalFlags();
+    [Intrinsic("HitObjectGet", 11)] public float3 WorldRayOrigin();
+    [Intrinsic("HitObjectGet", 12)] public float3 WorldRayDirection();
+    [Intrinsic("HitObjectGet", 13)] public float3 ObjectRayOrigin();
+    [Intrinsic("HitObjectGet", 14)] public float3 ObjectRayDirection();
+    [Intrinsic("HitObjectGet", 15)] public float3x4 ObjectToWorld();
+    [Intrinsic("HitObjectGet", 16)] public float3x4 WorldToObject();
+    [Intrinsic("HitObjectGet", 17)] public uint ShaderTableIndex();
+}
+
+/// Regroups the threads of a ray generation shader by where *hit* will shade (SER, §9.8).
+[Intrinsic("ReorderThread"), Stage(ShaderStage.RayGeneration), Requires(Features.ShaderExecutionReorder)]
+public void ReorderThread(HitObject hit);
+/// Regroups by *hit*, then by the low *hintBits* bits of *coherenceHint*.
+[Intrinsic("ReorderThread"), Stage(ShaderStage.RayGeneration), Requires(Features.ShaderExecutionReorder)]
+public void ReorderThread(HitObject hit, uint coherenceHint, uint hintBits);
+/// Regroups by the low *hintBits* bits of *coherenceHint*.
+[Intrinsic("ReorderThread"), Stage(ShaderStage.RayGeneration), Requires(Features.ShaderExecutionReorder)]
+public void ReorderThread(uint coherenceHint, uint hintBits);
+
+// RECOVERY-DECISION lang-files-D4: the cooperative vector and matrix API of §9.9, declared from the spec; intrinsic
+// names are the MIR ones. MatrixRef and VectorRef are plain views of GPU memory that MatMul and friends read.
+/// How a matrix in a buffer is laid out (§9.9); the RHI converts to and from the optimal layouts at upload.
+public enum MatrixLayout : uint { RowMajor, ColumnMajor, InferencingOptimal, TrainingOptimal }
+/// The role of a cooperative matrix in MulAdd (§9.9).
+public enum MatrixUse : uint { A, B, Accumulator }
+
+/// A per-thread vector of N elements, N possibly far above 4 (§9.9).
+[Builtin("CoopVector"), Requires(Features.CooperativeVector)]
+public struct CoopVector<T, int N> where T : INumeric, IScalar
+{
+    [Intrinsic("CoopVectorLoad")] public static CoopVector<T, N> Load(Ptr<byte> pointer);
+    [Intrinsic("CoopVectorLoad")] public static CoopVector<T, N> Load(Ptr<byte, Access.ReadWrite> pointer);
+    [Intrinsic("CoopVectorStore")] public void Store(Ptr<byte, Access.ReadWrite> pointer);
+}
+
+/// An M x K matrix at *pointer* (§9.9); *stride* is the row or column pitch of the non-optimal layouts.
+[Builtin("MatrixRef"), Requires(Features.CooperativeVector)]
+public struct MatrixRef<T, int M, int K> where T : INumeric, IScalar
+{
+    public MatrixRef(Ptr<byte> pointer, MatrixLayout layout, uint stride = 0);
+}
+
+/// N elements at *pointer* (§9.9), such as a bias.
+[Builtin("VectorRef"), Requires(Features.CooperativeVector)]
+public struct VectorRef<T, int N> where T : INumeric, IScalar
+{
+    public VectorRef(Ptr<byte> pointer);
+}
+
+[Intrinsic("CoopVectorMatMul"), Requires(Features.CooperativeVector)]
+public CoopVector<T, M> MatMul<T, int M, int K>(MatrixRef<T, M, K> matrix, CoopVector<T, K> input)
+    where T : INumeric, IScalar;
+[Intrinsic("CoopVectorMatMulAdd"), Requires(Features.CooperativeVector)]
+public CoopVector<T, M> MatMulAdd<T, int M, int K>(MatrixRef<T, M, K> matrix, CoopVector<T, K> input,
+                                                   VectorRef<T, M> bias)
+    where T : INumeric, IScalar;
+/// Adds the outer product of *a* and *b* to the matrix at *pointer* (training, §9.9).
+[Intrinsic("CoopVectorOuterProductAccumulate"), Requires(Features.CooperativeVectorTraining)]
+public void OuterProductAccumulate<T, int M, int K>(CoopVector<T, M> a, CoopVector<T, K> b, Ptr<byte, Access.ReadWrite> pointer,
+                                                   MatrixLayout layout = MatrixLayout.TrainingOptimal)
+    where T : INumeric, IScalar;
+/// Adds the elements of *v* to the vector at *pointer* (training, §9.9).
+[Intrinsic("CoopVectorReduceSumAccumulate"), Requires(Features.CooperativeVectorTraining)]
+public void ReduceSumAccumulate<T, int N>(CoopVector<T, N> v, Ptr<byte, Access.ReadWrite> pointer)
+    where T : INumeric, IScalar;
+
+/// An M x N matrix held by a whole wave (§9.9); compute only, and used in wave-uniform control flow.
+[Builtin("CoopMatrix"), Requires(Features.CooperativeMatrix)]
+public struct CoopMatrix<T, int M, int N, MatrixUse U> where T : INumeric, IScalar
+{
+    [Intrinsic("CoopMatrixLoad"), Stage(ShaderStage.Compute)]
+    public static CoopMatrix<T, M, N, U> Load(Ptr<byte> pointer, uint stride, MatrixLayout layout);
+    [Intrinsic("CoopMatrixLoad"), Stage(ShaderStage.Compute)]
+    public static CoopMatrix<T, M, N, U> Load(Ptr<byte, Access.ReadWrite> pointer, uint stride, MatrixLayout layout);
+    [Intrinsic("CoopMatrixStore"), Stage(ShaderStage.Compute)]
+    public void Store(Ptr<byte, Access.ReadWrite> pointer, uint stride, MatrixLayout layout);
+    /// The number of elements this thread holds.
+    [Intrinsic("CoopMatrixLength"), Stage(ShaderStage.Compute)] public uint Length();
+}
+
+/// a * b + c (§9.9).
+[Intrinsic("CoopMatrixMulAdd"), Stage(ShaderStage.Compute), Requires(Features.CooperativeMatrix)]
+public CoopMatrix<C, M, N, MatrixUse.Accumulator> MulAdd<T, C, int M, int K, int N>(
+    CoopMatrix<T, M, K, MatrixUse.A> a, CoopMatrix<T, K, N, MatrixUse.B> b, CoopMatrix<C, M, N, MatrixUse.Accumulator> c)
+    where T : INumeric, IScalar where C : INumeric, IScalar;

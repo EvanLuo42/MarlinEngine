@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "edbd283d-12fe-42e1-8b00-b9081ab45d47"
+    !Name = "NotoSans-Bold"
+    SourceFile = `source:NotoSans-Bold.ttf#9d9a6cef-b58b-44a0-8039-ae0ff5e50ff6`
+    FaceIndex = 0
+}

@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "fd99b9db-4979-46b2-9b32-87543859ee47"
+    !Name = "Inter-Medium"
+    SourceFile = `source:Inter-Medium.ttf#b3b72fe0-d152-4c42-90fc-6028f9628191`
+    FaceIndex = 0
+}

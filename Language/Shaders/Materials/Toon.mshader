@@ -1,0 +1,29 @@
+/// A cel-shaded material through a custom BSDF (Documentation/Architecture/07 §4.3): light falls off in Steps bands,
+/// and ambient light is flat. Only shader code: the lighting pass is compiled for ToonBsdf, the closure type it adds.
+namespace Marlin.Materials;
+
+using Marlin.Shading;
+
+public struct ToonBsdf : IBsdf
+{
+    public half3 Color;
+    public half Steps;
+
+    public half3 EvaluateDirect(in BsdfContext ctx, in LightSample light)
+    {
+        half bands = Max(Steps, 1.0h);
+        half lit = Floor((half)Saturate(Dot(ctx.N, light.L)) * bands) / bands;
+        return Color * lit * (half)(1 / Pi);
+    }
+
+    public half3 EvaluateIndirect(in BsdfContext ctx, float3 ambient) => Color * (half3)ambient;
+}
+
+[Material, Id("d7ea0cfd-d7c4-45ad-8c77-dff3cfeff043")]
+public struct Toon : ISurfaceMaterial
+{
+    [Color] public half3 Color = half3(0.9h, 0.35h, 0.2h);
+    [Range(1, 8)] public half Steps = 3.0h;
+
+    public Surface Evaluate(in SurfaceInputs input) => Surface.Custom(new ToonBsdf { Color = Color, Steps = Steps });
+}

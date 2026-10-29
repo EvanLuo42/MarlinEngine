@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "6a557bed-26ea-51e8-9f56-8fa649a84b02"
+    !Name = "person-standing"
+    SourceFile = `source:person-standing.svg#223c1722-c1b8-4da3-8093-7ee69e7c5061`
+}

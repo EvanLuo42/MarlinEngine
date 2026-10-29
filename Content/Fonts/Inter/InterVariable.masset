@@ -1,0 +1,9 @@
+!Version "1.0"
+
+FontSource
+{
+    !UUID = "3d37678b-3443-4929-bf97-90709c99c121"
+    !Name = "InterVariable"
+    SourceFile = `source:InterVariable.ttf#b9f5e747-c7e4-44ad-9bc2-de750fb2945d`
+    FaceIndex = 0
+}

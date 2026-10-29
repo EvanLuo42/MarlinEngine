@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "0ac5957e-d8de-5030-b4b2-f97ab708102d"
+    !Name = "settings"
+    SourceFile = `source:settings.svg#ac06e410-07ec-495b-addd-da71d0bef286`
+}

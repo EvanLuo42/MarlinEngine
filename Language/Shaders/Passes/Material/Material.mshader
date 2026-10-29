@@ -1,0 +1,392 @@
+/// Material Classification and Material Resolve (Documentation/Architecture/07 §3, §4.2): classification finds each
+/// pixel's material permutation and lists every 8×8 tile under each permutation it has pixels of; Resolve, compiled
+/// once per permutation (MarlinLanguage §9.4), evaluates the material of its pixels and writes their closures
+/// (Closures.mshader). The material is differentiated along screen x and y (§9.12), so its texture samples see their
+/// UV derivatives: the inputs carry the change of each attribute from this pixel to the next one along x and y.
+namespace Marlin.Passes.Material;
+
+using Marlin.Passes.Scene;
+using Marlin.Shading;
+
+/// No permutation: an empty pixel, or one whose material is not ready.
+const uint NoBin = 4294967295;
+
+public struct ClassifyArguments
+{
+    public Span<SceneViewData> View;
+    public Span<ulong> VisBuffer;
+    public Span<SceneVisibleCluster> Visible;
+    public Span<SceneCluster> Clusters;
+    public Span<SceneInstance> Instances;
+    public Span<SceneMesh> Meshes;
+    public Span<uint> Sections;
+    /// Per material binding, its first section in Sections; ~0u while it is being made (the mesh's defaults draw).
+    public Span<uint> MaterialBindings;
+    /// Two uint per material slot: its permutation and its element.
+    public Span<uint> MaterialSlots;
+    /// Per pixel: its permutation, or NoBin.
+    public Span<uint, Access.ReadWrite> Bins;
+    /// Per permutation, TileCapacity tiles, and how many are listed.
+    public Span<uint, Access.ReadWrite> TileLists;
+    public Span<uint, Access.ReadWrite> TileCounts;
+    public uint TileCapacity;
+    public uint TilesX;
+    public uint PermutationCount;
+}
+
+/// The material slot of a visible pixel's cluster: the section table entry of its section, in its instance's material
+/// binding or its mesh's defaults.
+uint MaterialSlotOf(Span<uint> sections, Span<uint> bindings, SceneInstance instance, SceneMesh mesh,
+                    SceneCluster cluster)
+{
+    uint first = instance.Materials != 0 ? bindings[instance.Materials] : 4294967295;
+    return sections[(first != 4294967295 ? first : mesh.FirstSection) + cluster.Section];
+}
+
+[GroupShared] static uint[64] TileBins;
+
+/// One group per 8×8 tile: each pixel's permutation, and the tile listed once under each permutation it has.
+[Compute(8, 8, 1)]
+void Classify([GroupId] uint3 group, [GroupThreadId] uint3 thread, [Uniform] in ClassifyArguments args)
+{
+    SceneViewData view = args.View[0];
+    uint x = group.x * 8 + thread.x;
+    uint y = group.y * 8 + thread.y;
+    uint lane = thread.y * 8 + thread.x;
+    uint bin = NoBin;
+    if (x < view.Width && y < view.Height)
+    {
+        ulong value = args.VisBuffer[y * view.Width + x];
+        if (value != 0ul)
+        {
+            uint payload = (uint)(value & 4294967295ul);
+            SceneVisibleCluster visible = args.Visible[payload >> TriangleBits];
+            SceneCluster cluster = args.Clusters[visible.Cluster];
+            SceneInstance instance = args.Instances[visible.Instance];
+            SceneMesh mesh = args.Meshes[instance.Mesh];
+            uint slot = MaterialSlotOf(args.Sections, args.MaterialBindings, instance, mesh, cluster);
+            bin = args.MaterialSlots[slot * 2];
+            bin = bin < args.PermutationCount ? bin : NoBin;
+        }
+        args.Bins[y * view.Width + x] = bin;
+    }
+    TileBins[lane] = bin;
+    Barrier.Group();
+    if (bin == NoBin)
+    {
+        return;
+    }
+    // The first lane with each permutation lists the tile under it.
+    for (uint other = 0; other < lane; ++other)
+    {
+        if (TileBins[other] == bin)
+        {
+            return;
+        }
+    }
+    uint listed = Atomic.Add(ref args.TileCounts[bin], 1u);
+    if (listed < args.TileCapacity)
+    {
+        args.TileLists[bin * args.TileCapacity + listed] = group.y * args.TilesX + group.x;
+    }
+}
+
+public struct ResolveArgumentsArguments
+{
+    public Span<uint> TileCounts;
+    /// Three uint per permutation: the groups of its Resolve.
+    public Span<uint, Access.ReadWrite> Arguments;
+    public uint TileCapacity;
+    public uint PermutationCount;
+    public uint GroupsX;
+}
+
+[Compute(64, 1, 1)]
+void BuildResolveArguments([DispatchThreadId] uint3 id, [Uniform] in ResolveArgumentsArguments args)
+{
+    if (id.x >= args.PermutationCount)
+    {
+        return;
+    }
+    uint count = Min(args.TileCounts[id.x], args.TileCapacity);
+    uint x = Min(count, args.GroupsX);
+    args.Arguments[id.x * 3] = x;
+    args.Arguments[id.x * 3 + 1] = x == 0 ? 0 : (count + args.GroupsX - 1) / args.GroupsX;
+    args.Arguments[id.x * 3 + 2] = 1;
+}
+
+public struct ResolveArguments<TMaterial> where TMaterial : ISurfaceMaterial
+{
+    public Span<SceneViewData> View;
+    public Span<ulong> VisBuffer;
+    public Span<SceneVisibleCluster> Visible;
+    public Span<SceneCluster> Clusters;
+    public Span<SceneInstance> Instances;
+    public Span<SceneMesh> Meshes;
+    public Span<uint> Sections;
+    /// Per material binding, its first section in Sections; ~0u while it is being made (the mesh's defaults draw).
+    public Span<uint> MaterialBindings;
+    public Span<uint> MaterialSlots;
+    public Ptr<byte> Geometry;
+    public Span<uint> Bins;
+    public Span<uint> TileLists;
+    public Span<uint> TileCounts;
+    public Span<uint, Access.ReadWrite> Headers;
+    public Span<uint, Access.ReadWrite> Plane;
+    public Span<uint, Access.ReadWrite> Records;
+    public Span<uint, Access.ReadWrite> RecordCount;
+    public Span<uint, Access.ReadWrite> TileFlags;
+    public uint RecordCapacity;
+    public uint TileCapacity;
+    public uint TilesX;
+    public uint GroupsX;
+    /// The permutation this pass is compiled for: its pixels are resolved, the others left.
+    public uint Permutation;
+    /// The permutation's materials: the struct's table, one element per material (§9.4).
+    public Span<TMaterial> Materials;
+}
+
+/// Perspective-correct barycentrics at *p*, in normalized device coordinates, of the triangle whose corners are at
+/// *ndc0*, *ndc1*, *ndc2* with reciprocal clip w *inverseW*.
+float3 Barycentrics(float2 ndc0, float2 ndc1, float2 ndc2, float3 inverseW, float2 p)
+{
+    float determinant = (ndc2.x - ndc1.x) * (ndc0.y - ndc1.y) - (ndc2.y - ndc1.y) * (ndc0.x - ndc1.x);
+    float inverse = Abs(determinant) > 1e-20 ? 1.0 / determinant : 0.0;
+    float3 dx = float3(ndc1.y - ndc2.y, ndc2.y - ndc0.y, ndc0.y - ndc1.y) * inverse * inverseW;
+    float3 dy = float3(ndc2.x - ndc1.x, ndc0.x - ndc2.x, ndc1.x - ndc0.x) * inverse * inverseW;
+    float2 delta = p - ndc0;
+    float interpolatedInverseW = inverseW.x + delta.x * (dx.x + dx.y + dx.z) + delta.y * (dy.x + dy.y + dy.z);
+    float w = 1.0 / interpolatedInverseW;
+    return float3(w * (inverseW.x + delta.x * dx.x + delta.y * dy.x), w * (delta.x * dx.y + delta.y * dy.y),
+                  w * (delta.x * dx.z + delta.y * dy.z));
+}
+
+float2 Mix2(float2 a, float2 b, float2 c, float3 l)
+{
+    return a * l.x + b * l.y + c * l.z;
+}
+
+float3 Mix3(float3 a, float3 b, float3 c, float3 l)
+{
+    return a * l.x + b * l.y + c * l.z;
+}
+
+float4 Mix4(float4 a, float4 b, float4 c, float3 l)
+{
+    return a * l.x + b * l.y + c * l.z;
+}
+
+/// The attributes of the triangle at barycentrics *l*: Position and View primal; with *derivative* the change along
+/// a direction, *l* then being the change of the barycentrics.
+SurfaceInputs Interpolate(float3 p0, float3 p1, float3 p2, SceneVertexAttributes a0, SceneVertexAttributes a1,
+                          SceneVertexAttributes a2, float3 n0, float3 n1, float3 n2, float3 t0, float3 t1, float3 t2,
+                          float3 l)
+{
+    SurfaceInputs inputs = default;
+    inputs.Position = Mix3(p0, p1, p2, l);
+    inputs.WorldNormal = Mix3(n0, n1, n2, l);
+    inputs.WorldTangent = Mix3(t0, t1, t2, l);
+    inputs.Uv0 = Mix2(a0.Uv0, a1.Uv0, a2.Uv0, l);
+    inputs.Uv1 = Mix2(a0.Uv1, a1.Uv1, a2.Uv1, l);
+    inputs.Color = Mix4(a0.Color, a1.Color, a2.Color, l);
+    return inputs;
+}
+
+/// A vector of mesh space as a direction in world space: rotated, and divided by the scale for a normal (the inverse
+/// transpose), multiplied by it for a tangent.
+float3 ToWorldDirection(SceneInstance instance, float3 v, bool normal)
+{
+    float3 scale = float3(instance.ScaleX, instance.ScaleY, instance.ScaleZ);
+    float3 scaled = normal ? v / scale : v * scale;
+    float3 rotated = RotateByQuaternion(instance.Rotation, scaled);
+    float length = Length(rotated);
+    return length > 0 ? rotated / length : rotated;
+}
+
+/// One group per tile listed under the permutation, one thread per pixel: the pixels of this permutation get their
+/// material's closures.
+[Compute(8, 8, 1)]
+void Resolve<TMaterial>([GroupId] uint3 group, [GroupThreadId] uint3 thread,
+                        [Uniform] in ResolveArguments<TMaterial> args)
+    where TMaterial : ISurfaceMaterial
+{
+    uint listed = group.y * args.GroupsX + group.x;
+    if (listed >= Min(args.TileCounts[args.Permutation], args.TileCapacity))
+    {
+        return;
+    }
+    uint tile = args.TileLists[args.Permutation * args.TileCapacity + listed];
+    SceneViewData view = args.View[0];
+    uint x = (tile % args.TilesX) * 8 + thread.x;
+    uint y = (tile / args.TilesX) * 8 + thread.y;
+    if (x >= view.Width || y >= view.Height)
+    {
+        return;
+    }
+    uint pixel = y * view.Width + x;
+    if (args.Bins[pixel] != args.Permutation)
+    {
+        return;
+    }
+    ulong value = args.VisBuffer[pixel];
+    uint payload = (uint)(value & 4294967295ul);
+    SceneVisibleCluster visible = args.Visible[payload >> TriangleBits];
+    SceneCluster cluster = args.Clusters[visible.Cluster];
+    SceneInstance instance = args.Instances[visible.Instance];
+    SceneMesh mesh = args.Meshes[instance.Mesh];
+    uint3 corners = LoadTriangle(args.Geometry, cluster, payload & TriangleMask);
+
+    // The corners relative to the camera and on screen.
+    float3 p0 = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, corners.x));
+    float3 p1 = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, corners.y));
+    float3 p2 = ToCameraRelative(instance, view, LoadPosition(args.Geometry, cluster, corners.z));
+    float4 c0 = ToClip(view, p0);
+    float4 c1 = ToClip(view, p1);
+    float4 c2 = ToClip(view, p2);
+    float3 inverseW = float3(1.0 / c0.w, 1.0 / c1.w, 1.0 / c2.w);
+    float2 ndc0 = c0.xy * inverseW.x;
+    float2 ndc1 = c1.xy * inverseW.y;
+    float2 ndc2 = c2.xy * inverseW.z;
+    float width = (float)view.Width;
+    float height = (float)view.Height;
+    // Pixel centers; pixels have y down, normalized device coordinates y up.
+    float2 at = float2(((float)x + 0.5) / width * 2 - 1, 1 - ((float)y + 0.5) / height * 2);
+    float3 l = Barycentrics(ndc0, ndc1, ndc2, inverseW, at);
+    float3 lx = Barycentrics(ndc0, ndc1, ndc2, inverseW, at + float2(2.0 / width, 0)) - l;
+    float3 ly = Barycentrics(ndc0, ndc1, ndc2, inverseW, at - float2(0, 2.0 / height)) - l;
+
+    SceneVertexAttributes a0 = LoadAttributes(args.Geometry, cluster, mesh, corners.x);
+    SceneVertexAttributes a1 = LoadAttributes(args.Geometry, cluster, mesh, corners.y);
+    SceneVertexAttributes a2 = LoadAttributes(args.Geometry, cluster, mesh, corners.z);
+    float3 n0 = ToWorldDirection(instance, a0.Normal, true);
+    float3 n1 = ToWorldDirection(instance, a1.Normal, true);
+    float3 n2 = ToWorldDirection(instance, a2.Normal, true);
+    float3 t0 = ToWorldDirection(instance, a0.Tangent.xyz, false);
+    float3 t1 = ToWorldDirection(instance, a1.Tangent.xyz, false);
+    float3 t2 = ToWorldDirection(instance, a2.Tangent.xyz, false);
+    SurfaceInputs inputs = Interpolate(p0, p1, p2, a0, a1, a2, n0, n1, n2, t0, t1, t2, l);
+    SurfaceInputs dx = Interpolate(p0, p1, p2, a0, a1, a2, n0, n1, n2, t0, t1, t2, lx);
+    SurfaceInputs dy = Interpolate(p0, p1, p2, a0, a1, a2, n0, n1, n2, t0, t1, t2, ly);
+    inputs.View = Normalize(-inputs.Position);
+    // A two-sided surface seen from behind shades its back: its normal turns to the viewer.
+    float3 geometric = Cross(p1 - p0, p2 - p0);
+    bool mirrored = instance.ScaleX * instance.ScaleY * instance.ScaleZ < 0;
+    bool back = (Dot(geometric, inputs.View) < 0) != mirrored;
+    inputs.WorldNormal = Normalize(inputs.WorldNormal) * (back ? -1.0 : 1.0);
+    inputs.WorldTangent = Length(inputs.WorldTangent) > 0 ? Normalize(inputs.WorldTangent) : inputs.WorldTangent;
+    inputs.BitangentSign = a0.Tangent.w * (mirrored ? -1.0 : 1.0);
+
+    uint slot = MaterialSlotOf(args.Sections, args.MaterialBindings, instance, mesh, cluster);
+    TMaterial material = args.Materials[args.MaterialSlots[slot * 2 + 1]];
+    DifferentialPair2<Surface> evaluated =
+        Autodiff.Forward(material.Evaluate, new DifferentialPair2<SurfaceInputs>(inputs, dx, dy));
+    Surface surface = evaluated.Primal;
+
+    // The closures: a first Slab in the plane, the rest in this pixel's overflow records.
+    uint count = Min(surface.Count, MaxClosures);
+    // The plane holds no coat: a covered first closure goes to a record.
+    bool plane = count > 0 && surface.Closures[0].Type == SlabClosure && !surface.Closures[0].IsCoated;
+    uint extra = count - (plane ? 1u : 0u);
+    uint first = NoOverflow;
+    if (extra > 0)
+    {
+        first = Atomic.Add(ref args.RecordCount[0], extra);
+        if (first + extra > args.RecordCapacity)
+        {
+            count = plane ? 1u : 0u;
+            extra = 0;
+            first = NoOverflow;
+        }
+    }
+    args.Headers[pixel] = count | (plane ? HeaderPlane : 0u) | (first << 8);
+    uint flags = TileCovered | (count > 1 ? TileComplex | TileNotSimple : 0u);
+    [Unroll]
+    for (uint i = 0; i < MaxClosures; ++i)
+    {
+        if (i < count)
+        {
+            Closure closure = surface.Closures[i];
+            bool slab = closure.Type == SlabClosure;
+            float3 normal = Length(closure.Slab.Normal) > 0 ? Normalize(closure.Slab.Normal) : inputs.WorldNormal;
+            uint[6] words;
+            PackSlab(closure.Slab, normal, (float)closure.Weight, out words);
+            bool simple = slab && closure.Slab.IsSimple && !closure.IsCoated &&
+                          (float)Dot(closure.Slab.Emission, half3(1.0h, 1.0h, 1.0h)) == 0;
+            flags |= (simple ? 0u : TileNotSimple) | (slab ? 0u : TileComplex | TileNotSimple);
+            if (i == 0 && plane)
+            {
+                [Unroll]
+                for (uint w = 0; w < SlabWords; ++w)
+                {
+                    args.Plane[pixel * SlabWords + w] = words[w];
+                }
+            }
+            else
+            {
+                uint record = (first + i - (plane ? 1u : 0u)) * RecordWords;
+                args.Records[record] = closure.Type;
+                args.Records[record + 1] = AsUInt((float)closure.Weight);
+                [Unroll]
+                for (uint w = 0; w < 8; ++w)
+                {
+                    args.Records[record + 2 + w] = slab ? (w < SlabWords ? words[w] : 0u) : closure.Payload[w];
+                }
+                // A Slab's words name its shading normal; a custom closure keeps the surface's here.
+                args.Records[record + 10] = PackOctahedral(normal);
+                args.Records[record + 11] =
+                    PackUnorm8x4(float4((float3)closure.CoatTransmittance, (float)closure.CoatSpecular));
+            }
+        }
+    }
+    Atomic.Or(ref args.TileFlags[tile], flags);
+}
+
+public struct TileListArguments
+{
+    public Span<uint> TileFlags;
+    /// TileClasses lists of TileCapacity tiles, their counts, and three uint of groups for each.
+    public Span<uint, Access.ReadWrite> Lists;
+    public Span<uint, Access.ReadWrite> Counts;
+    public uint TileCount;
+    public uint TileCapacity;
+    /// Zero lists every tile drawn as Complex (r.Scene.MaterialTileClasses).
+    public uint Classify;
+}
+
+/// One thread per tile: Simple (only plain Slabs, or nothing drawn), Single (one closure per pixel) or Complex.
+[Compute(64, 1, 1)]
+void BuildTileLists([DispatchThreadId] uint3 id, [Uniform] in TileListArguments args)
+{
+    if (id.x >= args.TileCount)
+    {
+        return;
+    }
+    uint flags = args.TileFlags[id.x];
+    uint kind = (flags & TileComplex) != 0 || (args.Classify == 0 && (flags & TileCovered) != 0) ? 2u
+              : (flags & TileNotSimple) != 0                                                    ? 1u
+                                                                                                : 0u;
+    uint listed = Atomic.Add(ref args.Counts[kind], 1u);
+    args.Lists[kind * args.TileCapacity + listed] = id.x;
+}
+
+public struct LightArgumentsArguments
+{
+    public Span<uint> Counts;
+    /// Three uint of groups per tile class.
+    public Span<uint, Access.ReadWrite> Arguments;
+    public uint GroupsX;
+}
+
+[Compute(1, 1, 1)]
+void BuildLightArguments([Uniform] in LightArgumentsArguments args)
+{
+    [Unroll]
+    for (uint kind = 0; kind < TileClasses; ++kind)
+    {
+        uint count = args.Counts[kind];
+        uint x = Min(count, args.GroupsX);
+        args.Arguments[kind * 3] = x;
+        args.Arguments[kind * 3 + 1] = x == 0 ? 0 : (count + args.GroupsX - 1) / args.GroupsX;
+        args.Arguments[kind * 3 + 2] = 1;
+    }
+}

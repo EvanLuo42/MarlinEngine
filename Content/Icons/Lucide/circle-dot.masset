@@ -1,0 +1,8 @@
+!Version "1.0"
+
+IconSource
+{
+    !UUID = "595af866-ef46-5c0b-a898-bbc29567edaa"
+    !Name = "circle-dot"
+    SourceFile = `source:circle-dot.svg#1d9a65ef-55f3-4f1d-bd6d-7223b86bb460`
+}
